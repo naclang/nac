@@ -1,0 +1,23 @@
+var merhaba : "Merhaba Dünya! 🌍"
+var türkçe : "Türkçe karakterler: ğüşıöçĞÜŞİÖÇ"
+var emoji : "Emojiler: 😀 🎉 ❤️ 🚀"
+var çince : "中文字符"
+var arapça : "العربية"
+var rusça : "Русский"
+
+print "=== UTF-8 Test ==="
+print merhaba
+print türkçe
+print emoji
+print çince
+print arapça
+print rusça
+
+var sayı : 38
+print "Sayı:"
+print sayı
+
+if sayı > 40
+    print "✓ Sayı 40'tan büyük"
+else
+    print "✗ Sayı 40'tan küçük veya eşit"
