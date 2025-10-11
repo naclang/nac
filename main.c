@@ -135,7 +135,7 @@ void evaluateExpression(const char* expr, char* result, size_t resultSize) {
             while ((isdigit((unsigned char)expr[i]) || expr[i]=='-') && j<sizeof(num)-1)
                 num[j++]=expr[i++];
             num[j]=0;
-            
+
             size_t remaining = resultSize - currentLen - 1;
             if (remaining > 0) {
                 size_t written = snprintf(result + currentLen, remaining + 1, "%s", num);
@@ -269,16 +269,27 @@ int evaluateCondition(const char* left, const char* op, const char* right) {
         rnum=atoi(right);
     }
     
-    if (strcmp(op,"=")==0 || strcmp(op,"==")==0) return lnum==rnum;
+    if (strcmp(op,"==")==0) return lnum==rnum;
     if (strcmp(op,"!=")==0) return lnum!=rnum;
     if (strcmp(op,">")==0) return lnum>rnum;
     if (strcmp(op,"<")==0) return lnum<rnum;
     if (strcmp(op,">=")==0) return lnum>=rnum;
     if (strcmp(op,"<=")==0) return lnum<=rnum;
+    if (strcmp(op,"=>")==0) return lnum>=rnum;
+    if (strcmp(op,"=<")==0) return lnum<=rnum;
     
     fprintf(stderr, "Hata: bilinmeyen karşılaştırma operatörü: %s\n", op);
     exit(1);
 }
+
+typedef struct {
+    long startPos;      // File position where loop body starts
+    int startLine;      // Line number where loop starts
+    char varName[256];  // Loop variable name
+    int start;          // Start value
+    int end;            // End value
+    int current;        // Current iteration value
+} LoopInfo;
 
 // ---------------- Main ----------------
 int main(int argc, char* argv[]) {
@@ -314,6 +325,19 @@ int main(int argc, char* argv[]) {
     char line[2048];
     int lineNumber = 0;
     int skipBlock=0,inIf=0,ifResult=0;
+    
+    LoopInfo activeLoop = {0};
+    int inLoop = 0;
+    
+    typedef struct {
+        long startPos;
+        int startLine;
+        char left[256];
+        char op[3];
+        char right[256];
+    } WhileInfo;
+    WhileInfo activeWhile = {0};
+    int inWhile = 0;
 
     while (fgets(line,sizeof(line),f)) {
         lineNumber++;
@@ -324,9 +348,59 @@ int main(int argc, char* argv[]) {
             continue; 
         }
 
-        char* l=line; while (*l==' '||*l=='\t') l++;
+        char* commentPos = strchr(line, '#');
+        if (commentPos) *commentPos = '\0';
 
-        if (strncmp(l,"var ",4)==0 && !skipBlock) {
+        char* l=line; 
+        while (*l==' '||*l=='\t') l++;
+
+        if (l[0] == '\0') continue;
+
+        // ----------------- Yeni Değişken İşlemleri -----------------
+        if (!skipBlock && strchr(l, ':')) { 
+            // x: x op num işlemi
+            char varName[256], var2[256], op[2];
+            int num;
+            if (sscanf(l, "%255s : %255s %1s %d", varName, var2, op, &num) == 4) {
+                Variable* v = findVariable(varName);
+                if (!v || v->type != TYPE_NUMBER) { 
+                    fprintf(stderr,"Hata (satır %d): sayı değişkeni bulunamadı: %s\n", lineNumber, varName); 
+                    continue; 
+                }
+
+                switch(op[0]) {
+                    case '+': v->numberValue += num; break;
+                    case '-': v->numberValue -= num; break;
+                    case '*': v->numberValue *= num; break;
+                    case '/': 
+                        if(num==0){fprintf(stderr,"Hata: 0'a bölme\n"); continue;}
+                        v->numberValue /= num; break;
+                    default: fprintf(stderr,"Hata: bilinmeyen operatör %c\n", op[0]); continue;
+                }
+                continue;
+            }
+        }
+        else if (!skipBlock && strlen(l) > 2 && strcmp(l+strlen(l)-2,"++")==0) {
+            char varName[256]; 
+            strncpy(varName, l, strlen(l)-2); 
+            varName[strlen(l)-2] = 0;
+            Variable* v = findVariable(varName);
+            if (!v || v->type != TYPE_NUMBER) { fprintf(stderr,"Hata: sayı değişkeni bulunamadı: %s\n",varName); continue; }
+            v->numberValue += 1;
+            continue;
+        }
+        else if (!skipBlock && strlen(l) > 2 && strcmp(l+strlen(l)-2,"--")==0) {
+            char varName[256]; 
+            strncpy(varName, l, strlen(l)-2); 
+            varName[strlen(l)-2] = 0;
+            Variable* v = findVariable(varName);
+            if (!v || v->type != TYPE_NUMBER) { fprintf(stderr,"Hata: sayı değişkeni bulunamadı: %s\n",varName); continue; }
+            v->numberValue -= 1;
+            continue;
+        }
+
+        // ----------------- Mevcut Kontroller -----------------
+        else if (strncmp(l,"var ",4)==0 && !skipBlock) {
             char rest[1024]; 
             if (sscanf(l,"var %1023[^\n]",rest) != 1) {
                 fprintf(stderr, "Hata (satır %d): geçersiz var sözdizimi\n", lineNumber);
@@ -362,6 +436,85 @@ int main(int argc, char* argv[]) {
                 continue;
             }
             readInput(varName);
+        }
+        else if (strncmp(l, "for ", 4) == 0 && !skipBlock) {
+            char varName[256];
+            int start, end;
+            if (sscanf(l+4, "%255s in %d..%d", varName, &start, &end) != 3) {
+                fprintf(stderr, "Hata (satır %d): geçersiz for sözdizimi\n", lineNumber);
+                continue;
+            }
+
+            activeLoop.startPos = ftell(f);
+            activeLoop.startLine = lineNumber + 1;
+            strncpy(activeLoop.varName, varName, sizeof(activeLoop.varName)-1);
+            activeLoop.start = start;
+            activeLoop.end = end;
+            activeLoop.current = start;
+            inLoop = 1;
+
+            Variable* v = findVariable(varName);
+            if (!v) {
+                if (varCount >= 100) {
+                    fprintf(stderr, "Hata: maksimum değişken sayısına ulaşıldı\n");
+                    exit(1);
+                }
+                v = &vars[varCount++];
+                strncpy(v->name, varName, sizeof(v->name)-1);
+            }
+            v->type = TYPE_NUMBER;
+            v->numberValue = start;
+        }
+        else if (strncmp(l, "end", 3) == 0 && inLoop && !skipBlock) {
+            activeLoop.current++;
+            
+            if (activeLoop.current <= activeLoop.end) {
+                Variable* v = findVariable(activeLoop.varName);
+                if (v) v->numberValue = activeLoop.current;
+                
+                fseek(f, activeLoop.startPos, SEEK_SET);
+                lineNumber = activeLoop.startLine - 1;
+            } else {
+                inLoop = 0;
+            }
+        }
+        else if (strncmp(l, "while ", 6) == 0 && !skipBlock) {
+            char left[256], op[3], right[256];
+            if (sscanf(l+6, "%255s %2s %255s", left, op, right) != 3) {
+                fprintf(stderr, "Hata (satır %d): geçersiz while sözdizimi\n", lineNumber);
+                continue;
+            }
+
+            if (evaluateCondition(left, op, right)) {
+                activeWhile.startPos = ftell(f);
+                activeWhile.startLine = lineNumber + 1;
+                strncpy(activeWhile.left, left, sizeof(activeWhile.left)-1);
+                strncpy(activeWhile.op, op, sizeof(activeWhile.op)-1);
+                strncpy(activeWhile.right, right, sizeof(activeWhile.right)-1);
+                inWhile = 1;
+            } else {
+                int depth = 1;
+                while (fgets(line, sizeof(line), f)) {
+                    lineNumber++;
+                    line[strcspn(line, "\r\n")] = 0;
+                    char* ll = line; 
+                    while (*ll==' '||*ll=='\t') ll++;
+                    
+                    if (strncmp(ll, "while ", 6) == 0) depth++;
+                    else if (strncmp(ll, "end", 3) == 0) {
+                        depth--;
+                        if (depth == 0) break;
+                    }
+                }
+            }
+        }
+        else if (strncmp(l, "end", 3) == 0 && inWhile && !skipBlock) {
+            if (evaluateCondition(activeWhile.left, activeWhile.op, activeWhile.right)) {
+                fseek(f, activeWhile.startPos, SEEK_SET);
+                lineNumber = activeWhile.startLine - 1;
+            } else {
+                inWhile = 0;
+            }
         }
         else if (strncmp(l,"if ",3)==0) {
             char left[256],op[3],right[256]; 

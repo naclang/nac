@@ -1,15 +1,7 @@
-var merhaba : "Merhaba Dünya! 🌍"
-var emoji : "Emojiler: \"😀 🎉 ❤️ 🚀\""
+var y = "NAR"
+print "Hello, " + y + "\n"
 
-print "=== Test ==="
-print merhaba
-print emoji
-
-print "bir sayı giriniz:"
-input sayi
-print "Sayı: \t" + sayi
-
-if sayi > 40
-    print "✓ \nSayı 40'tan büyük"
-else
-    print "✗ \nSayı 40'tan küçük veya eşit"
+print "Enter a number: "
+input num
+var y = num
+print "You typed: " + y
