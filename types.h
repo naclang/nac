@@ -31,6 +31,7 @@ typedef struct {
     int conditionResult;
     int hasElse;
     int inElseBlock;
+    int skipLevelAtStart;
 } IfBlock;
 
 typedef struct {
