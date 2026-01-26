@@ -1,122 +1,115 @@
-### 1. Değişken Tanımlama ve Atama
+## NaC Dili Nedir?
 
-- **Değişken Tanımlama (`var`):** Değişken tanımlamak için kullanılır.
-    - Sözdizimi: `var degisken_adi = deger`
-    - Örnek: `var x = 5`, `var sonuc = a + b`
-- **Sabit Tanımlama (`const`):** Değeri sonradan değiştirilemeyecek sabitleri tanımlamak için kullanılır.
-    - Sözdizimi: `const sabit_adi = deger`
-- **Atama:** Daha önce tanımlanmış bir değişkene yeni bir değer atamak için kullanılır.
-    - Sözdizimi: `degisken_adi = yeni_deger`
+**NaC (Not a C) Language Interpreter**, sembol ağırlıklı, minimal ve C-benzeri yorumlanan bir dildir.
 
-### 2. Veri Tipleri
+* Amaç: Küçük, öğrenmesi kolay ve temel C-syntax’ına benzer bir dil deneyimi sunmak.
+* Kullanım alanı: Matematiksel işlemler, döngüler, koşullar ve fonksiyon tanımlamaları yapabilmek.
 
-Kod, sayılar (tam sayılar) ve dizeleri (string) desteklemektedir.
+---
 
-- **Sayı (Number):** Tam sayı değerleri.
-- **Dize (String):** Metinsel değerler.
+## Önemli Özellikler
 
-### 3. Girdi/Çıktı İşlemleri
+### 1. Değişkenler
 
-- **Ekrana Yazdırma (`print`):** Değişkenlerin veya ifadelerin değerlerini ekrana yazar.
-    - Sözdizimi: `print ifade_veya_degisken`
-    - Varsayılan olarak, yazdıktan sonra yeni bir satıra geçer, ancak bir sonraki komut `input` ise yeni satıra geçmez.
-    - Örnek: `print "Toplam: " + sonuc`
-- **Kullanıcıdan Girdi Alma (`input`):** Kullanıcıdan bir değer okur ve belirtilen değişkene atar.
-    - Sözdizimi: `input degisken_adi`
-    - Okunan değer sayısalsa sayı, değilse dize olarak değişkene atanır.
-    - Örnek: `input y`
+* **Sembol tabanlı:** `$a` … `$z`
+* Maksimum 26 değişken (`a`–`z`)
+* Tüm değişkenler integer (`int`) tipindedir.
 
-### 4. Matematiksel ve İlişkisel İşlemler
+### 2. Sabitler
 
-İfadeler içinde matematiksel, ilişkisel ve mantıksal operatörler kullanılabilir.
+* Sayılar: `#12`, negatif sayılar: `#-12`
 
-- **Artırma/Azaltma:** Sayı değişkenlerinin değerini 1 artırma veya azaltma.
-    - Artırma: `degisken_adi++`
-    - Azaltma: `degisken_adi--`
-- **Sayısal İfadeler:** `a + b` gibi ifadeler desteklenir.
-- **Karşılaştırma (Koşullar):** `x < 10`, `y > 5` gibi karşılaştırmalar desteklenir.
-- **Dize Birleştirme:** `+` operatörü ile dize birleştirme.
-    - Örnek: `print "\nToplam: " + sonuc`
+### 3. Operatörler
 
-### 5. Mantıksal Operatörler
+* **Aritmetik:** `+`, `-`, `*`, `/`
+* **Atama:** `=`
+* **Artırma/azaltma:** `++`, `--`
+* **Karşılaştırma:** `==`, `!=`, `<`, `>`, `<=`, `>=`
+* **Mantıksal:** `&&`, `||`, `!`
 
-`if` ve `while` gibi kontrol yapılarında koşul değerlendirmek için kullanılır.
+### 4. Kontrol Yapıları
 
-- **VE (`and`):** Mantıksal VE (AND) operatörü.
-    - Örnek: `if x < 10 and y > 5`
-- **VEYA (`or`):** Mantıksal VEYA (OR) operatörü.
-    - Örnek: `if x > 10 or y > 5`
-- **DEĞİL (`not`):** Mantıksal DEĞİL (NOT) operatörü.
-    - Örnek: `if not x > 10`
+* **If-else:** `?(KOŞUL){...}:{...};`
+* **For döngüsü:** `@($i = #0 ; $i < #5 ; $i++){...};`
 
-### 6. Akış Kontrol Komutları
+  * Break: `break;`
+  * Continue: `continue;`
 
-- **Koşullu İfadeler (`if`, `else`, `end`):** Koşula bağlı kod çalıştırma.
-    - Sözdizimi:
-        
-        ```jsx
-        if koşul
-            // Koşul doğruysa çalışacak kod
-        else
-            // Koşul yanlışsa çalışacak kod (isteğe bağlı)
-        end
-        ```
-        
-    - Örnek:
-        
-        ```jsx
-        if x < 10 and y > 5
-            print "Her iki koşul da doğru!"
-        end
-        ```
-        
-- **`for` Döngüsü:** Belirli bir sayı aralığında yineleme yapmak için kullanılır.
-    - Sözdizimi: `for degisken_adi in baslangic_degeri..bitis_degeri`
-    - Döngü blokları `end` ile sonlandırılır.
-- **`while` Döngüsü:** Bir koşul doğru olduğu sürece kod bloğunu çalıştırmak için kullanılır.
-    - Sözdizimi: `while koşul`
-    - Döngü blokları `end` ile sonlandırılır.
+### 5. Fonksiyonlar
 
-### 7. Diziler (Array)
+* Tanım: `fn $f($a, $b){ ... };`
+* Çağrı: `$f(#1, #2)`
+* Return: `rn <değer>;`
 
-- **Dizi Tanımlama:** Dizi tanımlama.
-    - Örnek: `var arr = [1, 2, 3, 4, 5]`
-- **Elemana Erişim/Atama:** Belirli bir indeksteki elemana erişmek veya atama yapmak.
-    - Erişim Örneği: `print arr[0]`
-    - Atama Örneği: `arr[index] = yeni_deger` (main.c'de destekleniyor)
-- **Dizi Metotları:**
-    - `.length`: Dizinin uzunluğunu döndürür.
-        - Örnek: `print arr.length`
-    - `.push(deger)`: Dizinin sonuna bir eleman ekler.
-        - Örnek: `arr.push(8)`
-    - `.pop()`: Dizinin sonundaki elemanı çıkarır.
-        - Örnek: `arr.pop()`
+### 6. Girdi / Çıktı
 
-### 8. Fonksiyonlar
+* **Input:** `$x = in;`
+* **Output:** `out($x);`
 
-- **Fonksiyon Tanımlama (`func`, `end`):** Tekrar kullanılabilir kod blokları tanımlamak için.
-    - Sözdizimi:
-        
-        ```jsx
-        func fonksiyon_adi(parametre1, parametre2, ...)
-            // Fonksiyon gövdesi
-        end
-        ```
-        
-    - Örnek:
-        
-        ```jsx
-        func topla(a, b)
-            var sonuc = a + b
-            print "\nToplam: " + sonuc
-        end
-        ```
-        
-- **Fonksiyon Çağırma:** Tanımlanan fonksiyonu çalıştırmak için.
-    - Sözdizimi: `fonksiyon_adi(arguman1, arguman2, ...)`
-    - Örnek: `topla(5, 3)`
+---
 
-### 9. Yorumlar
+## NaC Yorumlayıcısını Kurmak ve Çalıştırmak
 
-- **Tek Satırlık Yorum:** `#` karakteri ile başlar ve satırın sonuna kadar yorum olarak kabul edilir.
-    - Örnek: `# Mantıksal operatörler testi`
+1. Kod dosyasını derleyin:
+
+```bash
+gcc -o nac nac.c
+```
+
+2. NaC programınızı yazın (ör. `program.nac`):
+
+```c
+$a = #10;
+$b = in;
+out($a + $b);
+```
+
+3. Programı çalıştırın:
+
+```bash
+./nac program.nac
+```
+
+* Kullanıcı girişleri `in;` ile alınır ve `out(expr);` ile ekrana yazdırılır.
+* Fonksiyonlar ve döngüler tam desteklenir.
+
+---
+
+
+## Notlar ve İleride Eklenebilecekler
+
+* **Hata mesajlarını geliştirmek** → hangi satırda hatalı daha net gösterilebilir
+* **Daha fazla veri tipi eklemek** → string, float, char
+* **Fonksiyon içinde fonksiyon tanımı** → Nested functions
+
+---
+
+
+Tamam! Sana hem README açıklamasını hem de mevcut özelliklerin durum çizelgesini hazırladım. Kodun yapısını ve işlevlerini detaylı şekilde açıkladım, ayrıca hangi özellikler çalışıyor, hangi eksik/çalışmıyor olabilecek, hangi özellikler eklenebilir bunları listeledim.
+
+---
+
+## Durum Çizelgesi
+
+| Özellik                           | Durum       | Açıklama / Notlar                                                                   |             |                                             |
+| --------------------------------- | ----------- | ----------------------------------------------------------------------------------- | ----------- | ------------------------------------------- |
+| Sabitler (#123)                   | ✅ | Negatif sayılar da destekleniyor                                                    |             |                                             |
+| Değişkenler ($a-$z)               | ✅ | Global ve fonksiyon scope yönetimi var                                              |             |                                             |
+| Aritmetik (`+ - * /`)             | ✅ | Sıfıra bölme hatası kontrolü var                                                    |             |                                             |
+| Karşılaştırma (`== != < > <= >=`) | ✅ | Mantıksal zincirleme ile                                                  |             |                                             |
+| Mantıksal | ✅ | Operatör önceliği doğru şekilde uygulanıyor |
+| Atama (`=`)                       | ✅ | $x = #123; veya $x = $y + #2;                                                       |             |                                             |
+| Artırma / Azaltma (`++ --`)       | ✅ | Hem tek başına hem for içinde                                                       |             |                                             |
+| If-Else                           | ✅ | `?(){...}:{...};` formatı                                                           |             |                                             |
+| For Döngüsü (@)                   | ✅ | Init, condition, increment + break/continue                                         |             |                                             |
+| Fonksiyon Tanımı (`fn`)           | ❌ | Parametre desteği, max 10 parametre                                                 |             |                                             |
+| Fonksiyon Çağrısı ($f(...))       | ❌ | Return değeri destekli                                                              |             |                                             |
+| Return (`rn`)                     | ❌ | Fonksiyonlar için                                                                   |             |                                             |
+| Input (`in`)                      | ✅ | scanf tabanlı                                                                       |             |                                             |
+| Output (`out`)                    | ✅ | printf tabanlı                                                                      |             |                                             |
+| Yorum satırı (//)                 | ✅ | Satır sonuna kadar atlıyor                                                          |             |                                             |
+| Scope yönetimi                    | ✅ | Global + fonksiyon local scope                                                      |             |                                             |
+| Hata yönetimi                     | ⚠️ | Bilinmeyen karakter, division by zero var; daha detaylı syntax hataları eklenebilir |             |                                             |
+| Nested fonksiyon                  | ❌ | Fonksiyon içinde fonksiyon tanımı                                                |             |                                             |
+| Boolean veri tipi                 | ❌ | Mantıksal işlemler int olarak dönüyor (0=false, 1=true)                             |             |                                             |
+| String / char desteği             | ❌ | Sadece int değerler                                                                 |             |                                             |

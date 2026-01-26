@@ -1,0 +1,30 @@
+// NaC Dili - Dongü Ornekleri (While kaldirildi)
+
+// For dongusu - 0'dan 4'e kadar sayilar
+// Sozdizimi: @( DEGISKEN ; KOSUL ; ARTIS ){ KOMUT; };
+@( $i = #0; $i < #5; $i++){ 
+    out($i); 
+};
+
+// Toplam hesaplama - 1'den 10'a kadar toplam
+$s = #0;
+@( $j = #1 ; $j < #11 ; $j++ ){
+    $s = $s + $j;
+};
+out($s);
+
+// Break ornegi - 3'te dur
+@( $k = #0; $k < #10; $k++ ){
+    ?($k == #3){
+        break;
+    }:{};
+    out($k);
+};
+
+// Continue ornegi - 2'yi atla
+@( $m = #0; $m < #5; $m++ ){
+    ?($m == #2){
+        continue;
+    }:{};
+    out($m);
+};

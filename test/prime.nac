@@ -1,0 +1,27 @@
+// Asal mı kontrol fonksiyonu
+fn $p($n){
+    ?($n < #2){
+        rn #0;
+    }; // else tamamen kaldırıldı
+
+    $i = #2;
+    @( $dummy = #0; $i < $n; $dummy++ ){ 
+        ?($i * $i > $n){
+            break;
+        }; // else kaldırıldı
+
+        ?($n / $i * $i == $n){
+            rn #0;
+        }; // else kaldırıldı
+
+        $i++;
+    };
+    rn #1;
+};
+
+// 2'den 30'a kadar asal sayıları bul
+@( $n = #2; $n < #31; $n++ ){
+    ?($p($n) == #1){
+        out($n);
+    }; // else kaldırıldı
+};

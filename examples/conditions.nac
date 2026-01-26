@@ -1,0 +1,39 @@
+// NaC Dili - Koşul Yapıları
+
+$x = #15;
+
+// Basit if-else
+?($x > #10){
+    out(#1);  // x > 10 ise 1 yazdır
+}:{
+    out(#0);  // değilse 0 yazdır
+};
+
+// Çoklu koşul kontrolü
+$n = #7;
+
+?($n == #0){
+    out(#100);
+}:{
+    ?($n > #0){
+        out(#1);   // pozitif
+    }:{
+        out(#-1);  // negatif
+    };
+};
+
+// Mantıksal operatörler
+$a = #5;
+$b = #10;
+
+?($a > #0 && $b > #0){
+    out(#1);  // ikisi de pozitif
+}:{
+    out(#0);
+};
+
+?($a > #100 || $b > #5){
+    out(#1);  // en az biri doğru
+}:{
+    out(#0);
+};
