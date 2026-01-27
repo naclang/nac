@@ -1,13 +1,25 @@
-// NaC Dili - Temel Örnek
-// Basit değişken ve çıktı işlemleri
+// NaC Dili v2.0 - Temel Ornek
 
-$x = #42;
+// Integer
+$x = 42;
 out($x);
 
-$y = #10;
-$z = $x + $y;
-out($z);
+// Float
+$y = 3.14;
+out($y);
 
-// Aritmetik işlemler
-$a = (#5 + #3) * #2;
+// String
+$s = "Merhaba Dunya!";
+out($s);
+
+// Aritmetik islemler
+$a = (5 + 3) * 2;
 out($a);
+
+// String birlestirme
+$m = "Sonuc: " + $a;
+out($m);
+
+// Float islemler
+$f = 10.5 / 2;
+out($f);

@@ -13,11 +13,10 @@
 
 * **Sembol tabanlı:** `$a` … `$z`
 * Maksimum 26 değişken (`a`–`z`)
-* Tüm değişkenler integer (`int`) tipindedir.
 
 ### 2. Sabitler
 
-* Sayılar: `#12`, negatif sayılar: `#-12`
+* Sayılar: `12`, negatif sayılar: `-12`
 
 ### 3. Operatörler
 
@@ -30,7 +29,7 @@
 ### 4. Kontrol Yapıları
 
 * **If-else:** `?(KOŞUL){...}:{...};`
-* **For döngüsü:** `@($i = #0 ; $i < #5 ; $i++){...};`
+* **For döngüsü:** `@($i = 0 ; $i < 5 ; $i++){...};`
 
   * Break: `break;`
   * Continue: `continue;`
@@ -38,7 +37,7 @@
 ### 5. Fonksiyonlar
 
 * Tanım: `fn $f($a, $b){ ... };`
-* Çağrı: `$f(#1, #2)`
+* Çağrı: `$f(1, 2)`
 * Return: `rn <değer>;`
 
 ### 6. Girdi / Çıktı
@@ -59,7 +58,7 @@ gcc -o nac nac.c
 2. NaC programınızı yazın (ör. `program.nac`):
 
 ```c
-$a = #10;
+$a = 10;
 $b = in;
 out($a + $b);
 ```
@@ -86,30 +85,3 @@ out($a + $b);
 
 
 Tamam! Sana hem README açıklamasını hem de mevcut özelliklerin durum çizelgesini hazırladım. Kodun yapısını ve işlevlerini detaylı şekilde açıkladım, ayrıca hangi özellikler çalışıyor, hangi eksik/çalışmıyor olabilecek, hangi özellikler eklenebilir bunları listeledim.
-
----
-
-## Durum Çizelgesi
-
-| Özellik                           | Durum       | Açıklama / Notlar                                                                   |             |                                             |
-| --------------------------------- | ----------- | ----------------------------------------------------------------------------------- | ----------- | ------------------------------------------- |
-| Sabitler (#123)                   | ✅ | Negatif sayılar da destekleniyor                                                    |             |                                             |
-| Değişkenler ($a-$z)               | ✅ | Global ve fonksiyon scope yönetimi var                                              |             |                                             |
-| Aritmetik (`+ - * /`)             | ✅ | Sıfıra bölme hatası kontrolü var                                                    |             |                                             |
-| Karşılaştırma (`== != < > <= >=`) | ✅ | Mantıksal zincirleme ile                                                  |             |                                             |
-| Mantıksal | ✅ | Operatör önceliği doğru şekilde uygulanıyor |
-| Atama (`=`)                       | ✅ | $x = #123; veya $x = $y + #2;                                                       |             |                                             |
-| Artırma / Azaltma (`++ --`)       | ✅ | Hem tek başına hem for içinde                                                       |             |                                             |
-| If-Else                           | ✅ | `?(){...}:{...};` formatı                                                           |             |                                             |
-| For Döngüsü (@)                   | ✅ | Init, condition, increment + break/continue                                         |             |                                             |
-| Fonksiyon Tanımı (`fn`)           | ❌ | Parametre desteği, max 10 parametre                                                 |             |                                             |
-| Fonksiyon Çağrısı ($f(...))       | ❌ | Return değeri destekli                                                              |             |                                             |
-| Return (`rn`)                     | ❌ | Fonksiyonlar için                                                                   |             |                                             |
-| Input (`in`)                      | ✅ | scanf tabanlı                                                                       |             |                                             |
-| Output (`out`)                    | ✅ | printf tabanlı                                                                      |             |                                             |
-| Yorum satırı (//)                 | ✅ | Satır sonuna kadar atlıyor                                                          |             |                                             |
-| Scope yönetimi                    | ✅ | Global + fonksiyon local scope                                                      |             |                                             |
-| Hata yönetimi                     | ⚠️ | Bilinmeyen karakter, division by zero var; daha detaylı syntax hataları eklenebilir |             |                                             |
-| Nested fonksiyon                  | ❌ | Fonksiyon içinde fonksiyon tanımı                                                |             |                                             |
-| Boolean veri tipi                 | ❌ | Mantıksal işlemler int olarak dönüyor (0=false, 1=true)                             |             |                                             |
-| String / char desteği             | ❌ | Sadece int değerler                                                                 |             |                                             |
