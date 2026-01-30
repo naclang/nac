@@ -1,12 +1,7 @@
 /*
- * NaC Language Interpreter v2.0
+ * NaC Language Interpreter v2.0.1
  * -----------------------------
  * Sembol agirlikli, minimal, C-benzeri bir yorumlanan dil.
- * 
- * Yenilikler v2.0:
- * - Sayilar artik # olmadan yazilir: 42, -5, 3.14
- * - 3 veri turu: int, float, string
- * - String: "merhaba"
  * 
  * Derleme: gcc -o nac nac.c -lm
  * Kullanim: ./nac program.nac
@@ -71,9 +66,9 @@ typedef enum {
     TOK_RPAREN,      // )
     TOK_LBRACE,      // {
     TOK_RBRACE,      // }
-    TOK_QUESTION,    // ? (if)
+    TOK_IF,    // if
     TOK_COLON,       // : (else)
-    TOK_AT,          // @ (for)
+    TOK_FOR,          // for
     TOK_PLUSPLUS,    // ++
     TOK_MINUSMINUS,  // --
     TOK_FN,          // fn
@@ -303,8 +298,14 @@ static void next_token(void) {
     if (strncmp(&code[pos], "rn", 2) == 0 && !isalnum(code[pos + 2])) {
         pos += 2; current_token.type = TOK_RN; return;
     }
+    if (strncmp(&code[pos], "if", 2) == 0 && !isalnum(code[pos + 2])) {
+        pos += 2;current_token.type = TOK_IF; return;
+    }
     if (strncmp(&code[pos], "in", 2) == 0 && !isalnum(code[pos + 2])) {
         pos += 2; current_token.type = TOK_IN; return;
+    }
+    if (strncmp(&code[pos], "for", 3) == 0 && !isalnum(code[pos + 3])) {
+        pos += 3;current_token.type = TOK_FOR; return;
     }
     if (strncmp(&code[pos], "out", 3) == 0 && !isalnum(code[pos + 3])) {
         pos += 3; current_token.type = TOK_OUT; return;
@@ -312,8 +313,8 @@ static void next_token(void) {
     if (strncmp(&code[pos], "break", 5) == 0 && !isalnum(code[pos + 5])) {
         pos += 5; current_token.type = TOK_BREAK; return;
     }
-    if (strncmp(&code[pos], "continue", 8) == 0 && !isalnum(code[pos + 8])) {
-        pos += 8; current_token.type = TOK_CONTINUE; return;
+    if (strncmp(&code[pos], "next", 4) == 0 && !isalnum(code[pos + 4])) {
+        pos += 4; current_token.type = TOK_CONTINUE; return;
     }
     
     // Cift karakterli operatorler
@@ -347,9 +348,7 @@ static void next_token(void) {
         case ')': current_token.type = TOK_RPAREN; return;
         case '{': current_token.type = TOK_LBRACE; return;
         case '}': current_token.type = TOK_RBRACE; return;
-        case '?': current_token.type = TOK_QUESTION; return;
         case ':': current_token.type = TOK_COLON; return;
-        case '@': current_token.type = TOK_AT; return;
         default:
             fprintf(stderr, "Bilinmeyen karakter: '%c' (ASCII: %d)\n", c, (int)c);
             error("Bilinmeyen karakter");
@@ -1012,12 +1011,12 @@ static void parse_statement(void) {
         return;
     }
     
-    if (current_token.type == TOK_QUESTION) {
+    if (current_token.type == TOK_IF) {
         parse_if();
         return;
     }
     
-    if (current_token.type == TOK_AT) {
+    if (current_token.type == TOK_FOR) {
         parse_for();
         return;
     }
@@ -1094,12 +1093,8 @@ static void init_interpreter(void) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        printf("NaC Dili Yorumlayicisi v2.0\n");
+        printf("NaC Dili Yorumlayicisi v2.0.1\n");
         printf("Kullanim: %s <dosya.nac>\n\n", argv[0]);
-        printf("Yenilikler:\n");
-        printf("  - Sayilar artik # olmadan: 42, 3.14\n");
-        printf("  - String destegi: \"merhaba\"\n");
-        printf("  - 3 veri turu: int, float, string\n");
         return 1;
     }
     

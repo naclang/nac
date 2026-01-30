@@ -1,6 +1,6 @@
 ## NaC Dili Nedir?
 
-**NaC (Not a C) Language Interpreter**, sembol ağırlıklı, minimal ve C-benzeri yorumlanan bir dildir.
+**NaC (Not a C) Language Interpreter**, minimal ve C-benzeri yorumlanan bir dildir.
 
 * Amaç: Küçük, öğrenmesi kolay ve temel C-syntax’ına benzer bir dil deneyimi sunmak.
 * Kullanım alanı: Matematiksel işlemler, döngüler, koşullar ve fonksiyon tanımlamaları yapabilmek.
@@ -28,11 +28,11 @@
 
 ### 4. Kontrol Yapıları
 
-* **If-else:** `?(KOŞUL){...}:{...};`
-* **For döngüsü:** `@($i = 0 ; $i < 5 ; $i++){...};`
+* **If-else:** `if(KOŞUL){...}:{...};`
+* **For döngüsü:** `for($i = 0 ; $i < 5 ; $i++){...};`
 
   * Break: `break;`
-  * Continue: `continue;`
+  * Continue: `next;`
 
 ### 5. Fonksiyonlar
 
@@ -71,17 +71,3 @@ out($a + $b);
 
 * Kullanıcı girişleri `in;` ile alınır ve `out(expr);` ile ekrana yazdırılır.
 * Fonksiyonlar ve döngüler tam desteklenir.
-
----
-
-
-## Notlar ve İleride Eklenebilecekler
-
-* **Hata mesajlarını geliştirmek** → hangi satırda hatalı daha net gösterilebilir
-* **Daha fazla veri tipi eklemek** → string, float, char
-* **Fonksiyon içinde fonksiyon tanımı** → Nested functions
-
----
-
-
-Tamam! Sana hem README açıklamasını hem de mevcut özelliklerin durum çizelgesini hazırladım. Kodun yapısını ve işlevlerini detaylı şekilde açıkladım, ayrıca hangi özellikler çalışıyor, hangi eksik/çalışmıyor olabilecek, hangi özellikler eklenebilir bunları listeledim.

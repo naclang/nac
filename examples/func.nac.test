@@ -1,4 +1,4 @@
-// NaC Dili v2.0 - Fonksiyon Ornekleri
+// NaC Dili - Fonksiyon Testi
 
 // Toplama fonksiyonu
 fn $a($x, $y){
