@@ -1,0 +1,21 @@
+
+$a = 1 + (time % 100);
+
+for($i = 0; $i <= 10; $i++) { 
+    $t = in;
+
+    if($t == $a) {
+        out("Tebrikler! Sayiyi bildiniz.");
+        break;
+    };
+    if($t < $a) {
+        out("Daha buyuk bir sayi deneyin.");
+    };
+    if($t > $a) {
+        out("Daha kucuk bir sayi deneyin.");
+    };
+}
+
+if($t != $a) {
+    out("Uzgunum, hakkiniz bitti. Sayim: " + $a);
+};

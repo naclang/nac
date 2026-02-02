@@ -13,6 +13,7 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <math.h>
+#include <time.h>
 
 /* ==================== SABITLER ==================== */
 #define MAX_VARS 26
@@ -66,15 +67,16 @@ typedef enum {
     TOK_RPAREN,      // )
     TOK_LBRACE,      // {
     TOK_RBRACE,      // }
-    TOK_IF,    // if
+    TOK_IF,          // if
     TOK_COLON,       // : (else)
-    TOK_FOR,          // for
+    TOK_FOR,         // for
     TOK_PLUSPLUS,    // ++
     TOK_MINUSMINUS,  // --
     TOK_FN,          // fn
     TOK_RN,          // rn (return)
     TOK_IN,          // in
     TOK_OUT,         // out
+    TOK_TIME,        // time
     TOK_BREAK,       // break
     TOK_CONTINUE     // continue
 } TokenType;
@@ -310,6 +312,11 @@ static void next_token(void) {
     if (strncmp(&code[pos], "out", 3) == 0 && !isalnum(code[pos + 3])) {
         pos += 3; current_token.type = TOK_OUT; return;
     }
+    if (strncmp(&code[pos], "time", 4) == 0 && !isalnum(code[pos + 4])) {
+        pos += 4;
+        current_token.type = TOK_TIME;
+        return;
+    }
     if (strncmp(&code[pos], "break", 5) == 0 && !isalnum(code[pos + 5])) {
         pos += 5; current_token.type = TOK_BREAK; return;
     }
@@ -448,6 +455,11 @@ static Value parse_primary(void) {
         Value val = current_token.value;
         next_token();
         return val;
+    }
+
+    if (current_token.type == TOK_TIME) {
+        next_token();
+        return make_int((int)time(NULL));
     }
     
     if (current_token.type == TOK_VAR) {
