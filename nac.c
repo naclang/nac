@@ -1,5 +1,5 @@
 /*
- * NaC Language Interpreter v2.0.1
+ * NaC Language Interpreter v2.0.2
  * -----------------------------
  * Sembol agirlikli, minimal, C-benzeri bir yorumlanan dil.
  * 
@@ -1105,7 +1105,7 @@ static void init_interpreter(void) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        printf("NaC Dili Yorumlayicisi v2.0.1\n");
+        printf("NaC Dili Yorumlayicisi v2.0.2\n");
         printf("Kullanim: %s <dosya.nac>\n\n", argv[0]);
         return 1;
     }

@@ -45,7 +45,7 @@ NaC dilinde değişkenler `$` sembolü ile başlar ve tek karakterlidir (`$a`, `
 
 NaC'da `else` bloğu için `:` sembolü kullanılır:
 
-```c
+```nac
 if ($a > 5) {
     out("Büyük");
 } : {
@@ -58,7 +58,7 @@ if ($a > 5) {
 
 Klasik C yapısına benzer ancak sembolik dokunuşlar içerir:
 
-```c
+```nac
 for ($i = 0; $i < 10; $i++) {
     out($i);
 };
@@ -69,7 +69,7 @@ for ($i = 0; $i < 10; $i++) {
 
 Fonksiyon tanımlamak için `fn`, değer döndürmek için `rn` anahtar kelimeleri kullanılır:
 
-```c
+```nac
 fn $s($a, $b) {
     $c = $a + $b;
     rn $c;
@@ -87,7 +87,7 @@ out($x);
 * **out(değer):** Ekrana çıktı verir.
 * **in:** Kullanıcıdan veri alır. Sayısal veya metinsel girdiyi otomatik algılar.
 
-```c
+```nac
 out("Adını yaz:");
 $n = in;
 out("Selam " + $n);
@@ -113,7 +113,7 @@ out("Selam " + $n);
 
 ## 📜 Örnek Program: Faktoriyel Hesaplama
 
-```c
+```nac
 fn $f($n) {
     if ($n <= 1) {
         rn 1;
