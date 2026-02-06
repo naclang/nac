@@ -1,0 +1,11 @@
+// Example: Factorial Calculation
+// ---------------------------------------------------
+n = 0;
+fn factorial(n) {
+    if(n <= 1) {
+        rn 1;
+    };
+    rn n * factorial(n - 1);
+};
+
+out(factorial(3));

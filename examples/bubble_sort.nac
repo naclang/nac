@@ -1,0 +1,30 @@
+// Example: Sorting (Bubble Sort)
+// ---------------------------------------------------
+
+fn bubble_sort(arr, size) {
+    for(i = 0; i < size - 1; i++) {
+        for(j = 0; j < size - i - 1; j++) {
+            if(arr[j] > arr[j + 1]) {
+                // Swap
+                temp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = temp;
+            };
+        };
+    };
+    rn arr;
+};
+
+unsorted = [64, 34, 25, 12, 22, 11, 90];
+out("Unsorted:");
+for(i = 0; i < 7; i++) {
+    out(unsorted[i]);
+};
+
+out("");
+
+sorted = bubble_sort(unsorted, 7);
+out("Sorted:");
+for(i = 0; i < 7; i++) {
+    out(sorted[i]);
+};

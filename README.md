@@ -1,133 +1,148 @@
-# 🚀 NaC Language (v2.0.2)
+# NaC Language Interpreter v3.0.0
 
-**NaC (Not a C)**, C dilinin gücünü sembolik bir minimalizmle birleştiren, yorumlanan (interpreted) bir betik dilidir.
+A lightweight, interpreted scripting language implemented in C. NaC (Not a C) is designed to be simple, expressive, and easy to embed for quick scripting tasks. This interpreter supports variables, arrays, functions, loops, conditionals, and basic I/O.
 
-## 📋 Genel Bakış
+---
 
-NaC, hızlı prototipleme ve temel programlama mantığını öğretmek için tasarlanmıştır. Güçlü bir tür desteği (int, float, string) ve fonksiyonel bir yapı sunar.
+## Features
 
-### 🛠 Derleme ve Çalıştırma
+* **Data Types:** Integers, floats, strings, arrays.
+* **Operators:** Arithmetic (`+`, `-`, `*`, `/`, `%`), comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`), logical (`&&`, `||`, `!`).
+* **Control Flow:** `if-else`, `for` loops, `break`, `continue`.
+* **Functions:** User-defined with parameters and `rn` (return) statements.
+* **I/O:** `in()` for input, `out()` for output.
+* **Arrays:** Dynamic arrays using `array(n)` or literal `[1, 2, 3]`.
+* **Time:** `time()` returns the current Unix timestamp.
+* **Error Reporting:** Line and column-specific messages.
+* **Increment/Decrement:** `++` and `--` operators.
 
-Yorumlayıcıyı derlemek için standart bir C derleyicisi yeterlidir:
+---
+
+## Installation
+
+Requires a C compiler (tested with `gcc`):
 
 ```bash
 gcc -o nac nac.c -lm
+```
+
+---
+
+## Usage
+
+Run a NaC script:
+
+```bash
 ./nac program.nac
+```
 
+Example `program.nac`:
+
+```nac
+fn add(a, b) {
+    rn a + b;
+};
+
+x = 10;
+y = 20;
+z = add(x, y);
+out(z);  // Output: 30
 ```
 
 ---
 
-## 💎 Dilin Temel Özellikleri
+## Syntax Overview
 
-### 1. Değişkenler ve Veri Türleri
-
-NaC dilinde değişkenler `$` sembolü ile başlar ve tek karakterlidir (`$a`, `$b`, ..., `$z`). Üç ana veri türü desteklenir:
-
-* **Integer:** `$a = 10;`
-* **Float:** `$b = 3.14;`
-* **String:** `$c = "Merhaba NaC";`
-
-### 2. Operatörler
-
-* **Aritmetik:** `+`, `-`, `*`, `/`, `%`
-* **Karşılaştırma:** `==`, `!=`, `<`, `>`, `<=`, `>=`
-* **Mantıksal:** `&&` (ve), `||` (veya), `!` (değil)
-* **Artırma/Azaltma:** `++`, `--`
-
-> [!TIP]
-> **String Sihri:** NaC dilinde stringleri `+` ile birleştirebilir veya `*` ile çoğaltabilirsiniz.
-> `$a = "Hey" * 3;` // Sonuç: "HeyHeyHey"
-
-### 3. Kontrol Yapıları
-
-#### If-Else (Eğer)
-
-NaC'da `else` bloğu için `:` sembolü kullanılır:
+### Variables
 
 ```nac
-if ($a > 5) {
-    out("Büyük");
+x = 5;
+y = 3.14;
+name = "NaC";
+```
+
+### Arrays
+
+```nac
+arr = array(5);  // Creates [0, 0, 0, 0, 0]
+nums = [1, 2, 3, 4];
+arr[0] = 42;
+out(arr[0]);
+```
+
+### Functions
+
+```nac
+fn greet(name) {
+    out("Hello, " + name + "!");
+};
+
+greet("Alice");  // Output: Hello, Alice!
+```
+
+* Return values using `rn`:
+
+```nac
+fn square(x) {
+    rn x * x;
+};
+out(square(5));  // Output: 25
+```
+
+### Conditionals
+
+```nac
+if (x > 10) {
+    out("Greater than 10");
 } : {
-    out("Küçük veya Eşit");
+    out("10 or less");
 };
-
 ```
 
-#### For Döngüsü
-
-Klasik C yapısına benzer ancak sembolik dokunuşlar içerir:
+### Loops
 
 ```nac
-for ($i = 0; $i < 10; $i++) {
-    out($i);
+for (i = 0; i < 5; i++) {
+    out(i);
 };
-
 ```
 
-### 4. Fonksiyonlar
+* Use `break;` to exit loops and `continue;` to skip to next iteration.
 
-Fonksiyon tanımlamak için `fn`, değer döndürmek için `rn` anahtar kelimeleri kullanılır:
+### I/O
 
 ```nac
-fn $s($a, $b) {
-    $c = $a + $b;
-    rn $c;
-};
+in(x);
+out(x);
+```
 
-$x = $s(5, 10);
-out($x);
+* Input supports integers, floats, and strings automatically.
 
+### Time
+
+```nac
+current = time();
+out(current);  // Prints current Unix timestamp
 ```
 
 ---
 
-## 📥 Girdi ve Çıktı (I/O)
+## Error Handling
 
-* **out(değer):** Ekrana çıktı verir.
-* **in:** Kullanıcıdan veri alır. Sayısal veya metinsel girdiyi otomatik algılar.
-
-```nac
-out("Adını yaz:");
-$n = in;
-out("Selam " + $n);
+NaC reports errors with line and column numbers:
 
 ```
-
----
-
-## 🧩 Dil Söz dizimi (Syntax) Tablosu
-
-| Anahtar Kelime | Açıklama |
-| --- | --- |
-| `fn` | Fonksiyon Tanımlama (Function) |
-| `rn` | Değer Döndürme (Return) |
-| `in` | Girdi Alma (Input) |
-| `out` | Çıktı Verme (Output) |
-| `time` | Mevcut Unix zaman damgasını döndürür |
-| `break` | Döngüyü kırar |
-| `next` | Döngünün sonraki adımına geçer (Continue) |
-| `:` | Else bloğunu ifade eder |
-
----
-
-## 📜 Örnek Program: Faktoriyel Hesaplama
-
-```nac
-fn $f($n) {
-    if ($n <= 1) {
-        rn 1;
-    };
-    rn $n * $f($n - 1);
-};
-
-out("Bir sayı girin:");
-$sayi = in;
-out("Sonuç:");
-out($f($sayi));
-
+Error (Line 3, Column 7): Undefined variable: x
 ```
 
+Execution stops after 10 errors to prevent excessive runtime issues.
+
 ---
 
-**NaC** ile kodlama yaparken değişkenlerin kapsamına (scope) dikkat etmeyi unutmayın. Global değişkenler her yerden erişilebilirken, fonksiyon içindeki değişkenler o fonksiyona özeldir.
+## Limitations
+
+* Maximum functions: 100
+* Maximum function parameters: 10
+* Maximum call stack depth: 100
+* Maximum array size: 10,000 elements
+* Strings limited to 1024 characters

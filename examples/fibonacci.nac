@@ -1,0 +1,12 @@
+// Example: Recursive Fibonacci
+// ---------------------------------------------------
+n = 0;
+fn fib_recursive(n) {
+    if(n <= 1) {
+        rn n;
+    };
+    rn fib_recursive(n - 1) + fib_recursive(n - 2);
+};
+
+out("Fibonacci(10) recursive:");
+out(fib_recursive(10));

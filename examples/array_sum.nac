@@ -1,0 +1,14 @@
+// Example: Array Sum
+// ---------------------------------------------------
+
+fn array_sum(arr, size) {
+    total = 0;
+    for(i = 0; i < size; i++) {
+        total = total + arr[i];
+    };
+    rn total;
+};
+
+numbers = [10, 20, 30, 40, 50];
+sum = array_sum(numbers, 5);
+out("Sum: " + sum);
