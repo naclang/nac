@@ -1,52 +1,38 @@
 # **NaC Language Roadmap**
 
-## **Stage 1 – Basic Language Development**
+## **Stage 1 – Basic Language Development** (v3) - IN PROGRESS
 
 Objective: To facilitate and improve the reliability of basic language use.
 
-1. **String operations**
+**Completed:**
+- ✅ Standard library: Math functions, File I/O, String utilities
+- ✅ Arrays with methods (first, last, reverse, slice, join, etc.)
 
-   * Concatenation (`+` veya `concat()` fonksiyonu)
-   * Substring (`substr()`)
-   * Length (`len()`)
-   * Split (`split(delimiter)`)
+**Remaining Tasks:**
 
-2. **Better scoping**
+1. **Better language**
+   * Modular compilation
+   * Add Structures (structs) 
+   * Better scoping
+      * True lexical scoping
+      * Nested blocks
+   * Debugging support
+      * Stack traces
+      * Breakpoints
 
-   * True lexical scoping
-   * Nested blocks
-   * Local variable shadowing
-
-3. **Debugging support**
-
-   * Stack traces
-   * Breakpoints
-   * Variable inspection (`inspect(var)`)
-
-4. **Standard library**
-
-   * Math functions (`sin`, `cos`, `sqrt`, `pow`, etc.)
-   * File I/O (`read_file()`, `write_file()`)
-   * String utilities (`trim`, `replace`, `lower`, `upper`)
-
-5. **Add arrays/maps**
-
-   * Arrays (dynamic size)
+2. **Add maps/dictionaries**
    * Maps/dictionaries (`map[key] = value`)
-   * Array methods (`push`, `pop`, `insert`, `remove`)
 
-6. **Optimize lexer**
-
+3. **Optimize lexer**
    * Build token stream once (instead of on-demand)
    * Improves performance for large programs
 
-7. **Optional: Type annotations**
-
+4. **Optional: Type annotations**
    * `int`, `float`, `string`, `array` (static hints, not enforced yet)
 
 ---
 
-## **Stage 2 – Network and Web API Support**
+## **Stage 2 – Network and Web API Support** (v4)
 
 Objective: To make NaC usable in web and network applications.
 
@@ -69,9 +55,8 @@ Objective: To make NaC usable in web and network applications.
 
 ---
 
-💡 **Forward-looking ideas (Stage 3)**
+## **Stage 3: Forward-looking ideas**
 
 * Event loop / async I/O
 * Networking sockets / WebSockets
 * Package manager / module system
-* REPL ve IDE support
