@@ -1,0 +1,80 @@
+// Stage 1 Complete Test Suite
+// Tests all new features added in Stage 1
+
+out("=================================================");
+out("       NaC Language Stage 1 Test Suite");
+out("=================================================");
+out("");
+
+// ============ MATH FUNCTIONS ============
+out("1. MATH FUNCTIONS");
+out("  sqrt(16) = " + sqrt(16));
+out("  pow(2, 10) = " + pow(2, 10));
+out("  sin(0) = " + sin(0));
+out("  cos(0) = " + cos(0));
+out("  abs(-42) = " + abs(-42));
+out("  floor(3.7) = " + floor(3.7));
+out("  ceil(3.2) = " + ceil(3.2));
+out("  round(3.5) = " + round(3.5));
+out("");
+
+// ============ STRING FUNCTIONS ============
+out("2. STRING FUNCTIONS");
+out("  length(\"hello\") = " + length("hello"));
+out("  upper(\"hello\") = " + upper("hello"));
+out("  lower(\"HELLO\") = " + lower("HELLO"));
+out("  trim(\"  spaces  \") = \"" + trim("  spaces  ") + "\"");
+out("  substr(\"abcdefg\", 2, 3) = " + substr("abcdefg", 2, 3));
+out("  indexOf(\"hello world\", \"world\") = " + indexOf("hello world", "world"));
+text = "foo bar foo";
+out("  replace(\"foo bar foo\", \"foo\", \"baz\") = " + replace(text, "foo", "baz"));
+out("");
+
+// ============ ARRAY FUNCTIONS ============
+out("3. ARRAY FUNCTIONS");
+arr = [5, 3, 8, 1, 9];
+out("  Array: [5, 3, 8, 1, 9]");
+out("  length(arr) = " + length(arr));
+out("  first(arr) = " + first(arr));
+out("  last(arr) = " + last(arr));
+rev = reverse(arr);
+out("  reverse(arr) = " + join(rev, ", "));
+slice_arr = slice(arr, 1, 4);
+out("  slice(arr, 1, 4) = " + join(slice_arr, ", "));
+nums = [10, 20, 30];
+out("  join([10, 20, 30], \" + \") = " + join(nums, " + "));
+out("");
+
+// ============ FILE I/O FUNCTIONS ============
+out("4. FILE I/O FUNCTIONS");
+bytes = write("stage1_test.txt", "NaC Stage 1 Test");
+out("  wrote to stage1_test.txt");
+content = read("stage1_test.txt");
+out("  read file contents");
+append_bytes = append("stage1_test.txt", " updated");
+out("  appended to stage1_test.txt");
+updated = read("stage1_test.txt");
+out("  updated content saved");
+out("");
+
+// ============ USER-DEFINED FUNCTIONS (Already Working) ============
+out("5. USER-DEFINED FUNCTIONS");
+fn add(a, b) {
+    rn a + b;
+};
+
+fn factorial(n) {
+    if(n <= 1) {
+        rn 1;
+    } : {
+        rn n * factorial(n - 1);
+    };
+};
+
+out("  add(5, 3) = " + add(5, 3));
+out("  factorial(5) = " + factorial(5));
+out("");
+
+out("=================================================");
+out("        All Stage 1 Tests Completed!");
+out("=================================================");
