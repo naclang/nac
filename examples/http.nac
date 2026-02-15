@@ -1,6 +1,4 @@
-
 // Example: HTTP Requests in NaC Language
-// ONLY WINDOWS USERS CAN RUN THIS EXAMPLE, BECAUSE IT USES WINHTTP LIBRARY
 // ------------------------------------------
 
 out("\n=== HTTP GET ORNEGI ===");
