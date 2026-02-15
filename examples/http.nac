@@ -1,0 +1,10 @@
+
+// Example: HTTP Requests in NaC Language
+// ONLY WINDOWS USERS CAN RUN THIS EXAMPLE, BECAUSE IT USES WINHTTP LIBRARY
+// ------------------------------------------
+
+out("\n=== HTTP GET ORNEGI ===");
+http("GET", "https://api.ipify.org/?format=json");
+
+out("\n=== HTTP POST ORNEGI ===");
+http("POST", "https://httpbin.org/post", "{\"mesaj\":\"Merhaba\",\"dil\":\"NaC\"}");

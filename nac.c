@@ -1,8 +1,9 @@
 /*
- * NaC Language Interpreter v3.0.0
+ * NaC Language Interpreter v3.1.0
  * ------------------------------------------
  * 
- * Compile: gcc -o nac nac.c -lm
+ * Compile windows: gcc -o nac.exe nac.c -lm -lwinhttp
+ * Compile linux & macOS: gcc -o nac nac.c -lm -lcurl
  * Usage: ./nac program.nac
  */
 
@@ -13,6 +14,16 @@
 #include <stdbool.h>
 #include <math.h>
 #include <time.h>
+
+#ifdef _WIN32
+    #define UNICODE
+    #define _UNICODE
+    #include <windows.h>
+    #include <winhttp.h>
+    #pragma comment(lib, "winhttp.lib")
+#else
+    #include <curl/curl.h>
+#endif
 
 /* ==================== CONSTANTS ==================== */
 #define MAX_FUNCS 100
@@ -87,8 +98,10 @@ typedef enum {
     TOK_TIME,
     TOK_BREAK,
     TOK_CONTINUE,
-    TOK_ARRAY
-} TokenType;
+    TOK_ARRAY,
+    TOK_WHILE,
+    TOK_HTTP
+} NaCTokenType;
 
 /* ==================== AST NODE TYPES ==================== */
 typedef enum {
@@ -112,7 +125,9 @@ typedef enum {
     AST_IN,
     AST_INCREMENT,
     AST_DECREMENT,
-    AST_ARRAY_LITERAL
+    AST_ARRAY_LITERAL,
+    AST_WHILE,
+    AST_HTTP
 } ASTNodeType;
 
 typedef struct ASTNode {
@@ -123,12 +138,12 @@ typedef struct ASTNode {
         char str_val[MAX_STRING_LEN];
         char var_name[MAX_TOKEN_LEN];
         struct {
-            TokenType op;
+            NaCTokenType op;
             struct ASTNode *left;
             struct ASTNode *right;
         } binary;
         struct {
-            TokenType op;
+            NaCTokenType op;
             struct ASTNode *operand;
         } unary;
         struct {
@@ -180,6 +195,15 @@ typedef struct ASTNode {
             struct ASTNode **elements;
             int count;
         } array_literal;
+        struct {
+            struct ASTNode *condition;
+            struct ASTNode *body;
+        } while_stmt;
+        struct {
+            struct ASTNode *method;
+            struct ASTNode *url;
+            struct ASTNode *body;
+        } http_stmt;
     };
 } ASTNode;
 
@@ -196,7 +220,7 @@ typedef struct {
 
 /* ==================== TOKEN STRUCTURE ==================== */
 typedef struct {
-    TokenType type;
+    NaCTokenType type;
     union {
         int int_val;
         double float_val;
@@ -550,12 +574,14 @@ static void next_token(void) {
         if (strcmp(ident, "rn") == 0) { current_token.type = TOK_RN; return; }
         if (strcmp(ident, "if") == 0) { current_token.type = TOK_IF; return; }
         if (strcmp(ident, "for") == 0) { current_token.type = TOK_FOR; return; }
+        if (strcmp(ident, "while") == 0) { current_token.type = TOK_WHILE; return; }
         if (strcmp(ident, "in") == 0) { current_token.type = TOK_IN; return; }
         if (strcmp(ident, "out") == 0) { current_token.type = TOK_OUT; return; }
         if (strcmp(ident, "time") == 0) { current_token.type = TOK_TIME; return; }
         if (strcmp(ident, "break") == 0) { current_token.type = TOK_BREAK; return; }
         if (strcmp(ident, "continue") == 0) { current_token.type = TOK_CONTINUE; return; }
         if (strcmp(ident, "array") == 0) { current_token.type = TOK_ARRAY; return; }
+        if (strcmp(ident, "http") == 0) { current_token.type = TOK_HTTP; return; }
         
         current_token.type = TOK_IDENT;
         strncpy(current_token.ident, ident, MAX_TOKEN_LEN - 1);
@@ -674,11 +700,20 @@ static void free_ast(ASTNode *node) {
             free_ast(node->for_stmt.increment);
             free_ast(node->for_stmt.body);
             break;
+        case AST_WHILE:
+            free_ast(node->while_stmt.condition);
+            free_ast(node->while_stmt.body);
+            break;
         case AST_RETURN:
             free_ast(node->return_stmt.value);
             break;
         case AST_OUT:
             free_ast(node->out_stmt.value);
+            break;
+        case AST_HTTP:
+            free_ast(node->http_stmt.method);
+            free_ast(node->http_stmt.url);
+            free_ast(node->http_stmt.body);
             break;
         case AST_ARRAY_LITERAL:
             for (int i = 0; i < node->array_literal.count; i++) {
@@ -694,7 +729,7 @@ static void free_ast(ASTNode *node) {
 }
 
 /* ==================== PARSER ==================== */
-static void expect(TokenType type) {
+static void expect(NaCTokenType type) {
     if (current_token.type != type) {
         char msg[256];
         snprintf(msg, sizeof(msg), "Expected token type %d, got %d", type, current_token.type);
@@ -862,7 +897,7 @@ static ASTNode* parse_multiplicative(void) {
     while (current_token.type == TOK_STAR || 
            current_token.type == TOK_SLASH || 
            current_token.type == TOK_PERCENT) {
-        TokenType op = current_token.type;
+        NaCTokenType op = current_token.type;
         next_token();
         ASTNode *right = parse_primary();
         
@@ -880,7 +915,7 @@ static ASTNode* parse_additive(void) {
     ASTNode *left = parse_multiplicative();
     
     while (current_token.type == TOK_PLUS || current_token.type == TOK_MINUS) {
-        TokenType op = current_token.type;
+        NaCTokenType op = current_token.type;
         next_token();
         ASTNode *right = parse_multiplicative();
         
@@ -900,7 +935,7 @@ static ASTNode* parse_comparison(void) {
     while (current_token.type == TOK_LT || current_token.type == TOK_GT ||
            current_token.type == TOK_LTE || current_token.type == TOK_GTE ||
            current_token.type == TOK_EQ || current_token.type == TOK_NEQ) {
-        TokenType op = current_token.type;
+        NaCTokenType op = current_token.type;
         next_token();
         ASTNode *right = parse_additive();
         
@@ -918,7 +953,7 @@ static ASTNode* parse_logical(void) {
     ASTNode *left = parse_comparison();
     
     while (current_token.type == TOK_AND || current_token.type == TOK_OR) {
-        TokenType op = current_token.type;
+        NaCTokenType op = current_token.type;
         next_token();
         ASTNode *right = parse_comparison();
         
@@ -1172,6 +1207,48 @@ static ASTNode* parse_statement(void) {
         return node;
     }
     
+    // While loop
+    if (current_token.type == TOK_WHILE) {
+        next_token();
+        expect(TOK_LPAREN);
+        
+        ASTNode *node = create_node(AST_WHILE);
+        node->while_stmt.condition = parse_expression();
+        expect(TOK_RPAREN);
+        node->while_stmt.body = parse_block();
+        expect(TOK_SEMI);
+        
+        return node;
+    }
+    
+    // HTTP request
+    if (current_token.type == TOK_HTTP) {
+        next_token();
+        expect(TOK_LPAREN);
+        
+        ASTNode *node = create_node(AST_HTTP);
+        
+        // Method
+        node->http_stmt.method = parse_expression();
+        expect(TOK_COMMA);
+        
+        // URL
+        node->http_stmt.url = parse_expression();
+        
+        // Optional body
+        if (current_token.type == TOK_COMMA) {
+            next_token();
+            node->http_stmt.body = parse_expression();
+        } else {
+            node->http_stmt.body = NULL;
+        }
+        
+        expect(TOK_RPAREN);
+        expect(TOK_SEMI);
+        
+        return node;
+    }
+    
     // Assignment or increment/decrement
     if (current_token.type == TOK_IDENT) {
         char var_name[MAX_TOKEN_LEN];
@@ -1232,6 +1309,191 @@ static ASTNode* parse_statement(void) {
     next_token(); // Try to recover
     return NULL;
 }
+
+/* ==================== HTTP HELPER ==================== */
+#ifdef _WIN32
+static void http_request_win(const char *method, const char *url, const char *body) {
+    // Parse URL: https://host/path veya http://host/path
+    bool is_https = (strncmp(url, "https://", 8) == 0);
+    bool is_http = (strncmp(url, "http://", 7) == 0);
+    
+    if (!is_https && !is_http) {
+        report_error("URL must start with http:// or https://");
+        return;
+    }
+    
+    const char *host_start = is_https ? (url + 8) : (url + 7);
+    const char *path_start = strchr(host_start, '/');
+    
+    wchar_t host[256];
+    wchar_t path[1024];
+    wchar_t method_w[16];
+    
+    // Host parse
+    int host_len = path_start ? (path_start - host_start) : strlen(host_start);
+    MultiByteToWideChar(CP_UTF8, 0, host_start, host_len, host, 256);
+    host[host_len] = 0;
+    
+    // Path parse
+    if (path_start) {
+        MultiByteToWideChar(CP_UTF8, 0, path_start, -1, path, 1024);
+    } else {
+        wcscpy(path, L"/");
+    }
+    
+    // Method convert
+    MultiByteToWideChar(CP_UTF8, 0, method, -1, method_w, 16);
+    
+    // WinHTTP session
+    HINTERNET session = WinHttpOpen(
+        L"NaC/1.0",
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME,
+        WINHTTP_NO_PROXY_BYPASS,
+        0
+    );
+    
+    if (!session) {
+        report_error("HTTP: Failed to open session");
+        return;
+    }
+    
+    INTERNET_PORT port = is_https ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
+    HINTERNET connect = WinHttpConnect(session, host, port, 0);
+    
+    if (!connect) {
+        report_error("HTTP: Failed to connect");
+        WinHttpCloseHandle(session);
+        return;
+    }
+    
+    DWORD flags = is_https ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET request = WinHttpOpenRequest(
+        connect,
+        method_w,
+        path,
+        NULL,
+        WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES,
+        flags
+    );
+    
+    if (!request) {
+        report_error("HTTP: Failed to open request");
+        WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        return;
+    }
+    
+    // Redirect support
+    DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &redirect, sizeof(redirect));
+    
+    // Send request
+    const wchar_t *headers = body ? L"Content-Type: application/json\r\n" : NULL;
+    BOOL result = WinHttpSendRequest(
+        request,
+        headers,
+        headers ? -1 : 0,
+        (LPVOID)body,
+        body ? (DWORD)strlen(body) : 0,
+        body ? (DWORD)strlen(body) : 0,
+        0
+    );
+    
+    if (!result) {
+        report_error("HTTP: Failed to send request");
+        WinHttpCloseHandle(request);
+        WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        return;
+    }
+    
+    WinHttpReceiveResponse(request, NULL);
+    
+    // Read response
+    DWORD size = 0;
+    do {
+        DWORD downloaded = 0;
+        WinHttpQueryDataAvailable(request, &size);
+        if (!size) break;
+
+        char *buffer = (char*)malloc(size + 1);
+        WinHttpReadData(request, buffer, size, &downloaded);
+        buffer[downloaded] = 0;
+        printf("%s", buffer);
+        free(buffer);
+    } while (size > 0);
+    
+    printf("\n");
+    
+    WinHttpCloseHandle(request);
+    WinHttpCloseHandle(connect);
+    WinHttpCloseHandle(session);
+}
+#else
+// libcurl callback function
+static size_t curl_write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t total_size = size * nmemb;
+    printf("%.*s", (int)total_size, (char*)contents);
+    return total_size;
+}
+
+static void http_request_unix(const char *method, const char *url, const char *body) {
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        report_error("HTTP: Failed to initialize curl");
+        return;
+    }
+    
+    // Set URL
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    
+    // Set method
+    if (strcmp(method, "POST") == 0) {
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        if (body) {
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+            
+            // Set JSON header
+            struct curl_slist *headers = NULL;
+            headers = curl_slist_append(headers, "Content-Type: application/json");
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        }
+    } else if (strcmp(method, "GET") == 0) {
+        curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    } else if (strcmp(method, "PUT") == 0) {
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+        if (body) {
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+        }
+    } else if (strcmp(method, "DELETE") == 0) {
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    }
+    
+    // Set user agent
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "NaC/1.0");
+    
+    // Follow redirects
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    
+    // Set write callback
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback);
+    
+    // Perform request
+    CURLcode res = curl_easy_perform(curl);
+    
+    if (res != CURLE_OK) {
+        char error_msg[256];
+        snprintf(error_msg, sizeof(error_msg), "HTTP: %s", curl_easy_strerror(res));
+        report_error(error_msg);
+    } else {
+        printf("\n");
+    }
+    
+    curl_easy_cleanup(curl);
+}
+#endif
 
 /* ==================== BUILT-IN FUNCTIONS ==================== */
 static bool is_builtin_function(const char *name) {
@@ -2048,6 +2310,51 @@ static Value eval_node(ASTNode *node) {
             return make_int(0);
         }
         
+        case AST_WHILE: {
+            while (1) {
+                Value condition = eval_node(node->while_stmt.condition);
+                if (!to_bool(condition)) break;
+                
+                should_continue = false;
+                eval_node(node->while_stmt.body);
+                
+                if (should_break) {
+                    should_break = false;
+                    break;
+                }
+                if (should_return) break;
+            }
+            
+            should_continue = false;
+            return make_int(0);
+        }
+        
+        case AST_HTTP: {
+            Value method_val = eval_node(node->http_stmt.method);
+            Value url_val = eval_node(node->http_stmt.url);
+            
+            if (method_val.type != TYPE_STRING || url_val.type != TYPE_STRING) {
+                report_error("http() requires string arguments");
+                return make_int(0);
+            }
+            
+            const char *body_str = NULL;
+            if (node->http_stmt.body) {
+                Value body_val = eval_node(node->http_stmt.body);
+                if (body_val.type == TYPE_STRING) {
+                    body_str = body_val.str_val;
+                }
+            }
+            
+            #ifdef _WIN32
+                http_request_win(method_val.str_val, url_val.str_val, body_str);
+            #else
+                http_request_unix(method_val.str_val, url_val.str_val, body_str);
+            #endif
+            
+            return make_int(0);
+        }
+        
         case AST_RETURN: {
             Value val = eval_node(node->return_stmt.value);
             return_value = copy_value(val);  // CRITICAL: Deep copy for arrays!
@@ -2191,7 +2498,7 @@ static void init_interpreter(void) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        printf("NaC Language Interpreter v3.0.0 \n");
+        printf("NaC Language Interpreter v3.1.0 \n");
         printf("Usage: %s <file.nac>\n\n", argv[0]);
         return 1;
     }

@@ -4,10 +4,6 @@
 
 Objective: To facilitate and improve the reliability of basic language use.
 
-**Completed:**
-- ✅ Standard library: Math functions, File I/O, String utilities
-- ✅ Arrays with methods (first, last, reverse, slice, join, etc.)
-
 **Remaining Tasks:**
 
 1. **Better language**
@@ -15,7 +11,7 @@ Objective: To facilitate and improve the reliability of basic language use.
    * Add Structures (structs) 
    * Better scoping
       * True lexical scoping
-      * Nested blocks
+      * Nested blocksI
    * Debugging support
       * Stack traces
       * Breakpoints
@@ -35,12 +31,6 @@ Objective: To facilitate and improve the reliability of basic language use.
 ## **Stage 2 – Network and Web API Support** (v4)
 
 Objective: To make NaC usable in web and network applications.
-
-1. **HTTP requests**
-
-   * HTTP GET
-   * HTTP POST
-   * Custom headers
 
 2. **JSON support**
 
