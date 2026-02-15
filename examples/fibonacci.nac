@@ -1,5 +1,6 @@
 // Example: Recursive Fibonacci
 // ---------------------------------------------------
+
 n = 0;
 fn fib_recursive(n) {
     if(n <= 1) {
