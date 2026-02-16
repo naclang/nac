@@ -1,4 +1,4 @@
-// Number Guessing Game
+// Example: Number Guessing Game
 // ---------------------------------------------------
 
 a = 1 + (time() % 100);

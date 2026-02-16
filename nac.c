@@ -1,11 +1,14 @@
 /*
- * NaC Language Interpreter v3.1.0
+ * NaC Language Interpreter
  * ------------------------------------------
  * 
  * Compile windows: gcc -o nac.exe nac.c -lm -lwinhttp
  * Compile linux & macOS: gcc -o nac nac.c -lm -lcurl
  * Usage: ./nac program.nac
- */
+*/
+
+#define NAC_VERSION "3.2.0"
+#define NAC_TAG "NaC" NAC_VERSION
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -238,6 +241,7 @@ typedef struct {
 } Function;
 
 /* ==================== GLOBAL VARIABLES ==================== */
+static char latest[64] = {0};
 static char *code = NULL;
 static int pos = 0;
 static int code_len = 0;
@@ -324,7 +328,6 @@ static void free_var_table(VarTable *table) {
 }
 
 static Value* get_var(const char *name) {
-    // Check local scope first
     if (call_depth > 0) {
         VarTable *local = call_stack_vars[call_depth - 1];
         unsigned int idx = hash(name);
@@ -337,7 +340,6 @@ static Value* get_var(const char *name) {
         }
     }
     
-    // Check global scope
     unsigned int idx = hash(name);
     VarEntry *entry = global_vars->buckets[idx];
     while (entry) {
@@ -379,7 +381,6 @@ static void set_var(const char *name, Value value) {
         entry = entry->next;
     }
     
-    // Create new entry
     VarEntry *new_entry = (VarEntry*)malloc(sizeof(VarEntry));
     strncpy(new_entry->name, name, MAX_TOKEN_LEN - 1);
     new_entry->name[MAX_TOKEN_LEN - 1] = '\0';
@@ -500,7 +501,6 @@ static void next_token(void) {
     
     char c = code[pos];
     
-    // Numbers
     if (isdigit(c) || (c == '-' && pos + 1 < code_len && isdigit(code[pos + 1]))) {
         int sign = 1;
         if (c == '-') {
@@ -531,7 +531,6 @@ static void next_token(void) {
         return;
     }
     
-    // Strings
     if (c == '"') {
         pos++;
         char str[MAX_STRING_LEN];
@@ -558,7 +557,6 @@ static void next_token(void) {
         return;
     }
     
-    // Identifiers and keywords
     if (isalpha(c) || c == '_' || c == '$') {
         int start = pos;
         while (pos < code_len && (isalnum(code[pos]) || code[pos] == '_')) {
@@ -569,7 +567,6 @@ static void next_token(void) {
         strncpy(ident, &code[start], len);
         ident[len] = '\0';
         
-        // Check keywords
         if (strcmp(ident, "fn") == 0) { current_token.type = TOK_FN; return; }
         if (strcmp(ident, "rn") == 0) { current_token.type = TOK_RN; return; }
         if (strcmp(ident, "if") == 0) { current_token.type = TOK_IF; return; }
@@ -588,7 +585,6 @@ static void next_token(void) {
         return;
     }
     
-    // Operators
     if (c == '+') {
         if (pos + 1 < code_len && code[pos + 1] == '+') {
             pos += 2; current_token.type = TOK_PLUSPLUS; return;
@@ -734,7 +730,6 @@ static void expect(NaCTokenType type) {
         char msg[256];
         snprintf(msg, sizeof(msg), "Expected token type %d, got %d", type, current_token.type);
         report_error(msg);
-        // Try to recover by advancing
         next_token();
     } else {
         next_token();
@@ -770,7 +765,6 @@ static ASTNode* parse_primary(void) {
         strncpy(name, current_token.ident, MAX_TOKEN_LEN - 1);
         next_token();
         
-        // Array access
         if (current_token.type == TOK_LBRACKET) {
             next_token();
             ASTNode *index = parse_expression();
@@ -781,7 +775,6 @@ static ASTNode* parse_primary(void) {
             return node;
         }
         
-        // Function call
         if (current_token.type == TOK_LPAREN) {
             next_token();
             node = create_node(AST_CALL);
@@ -809,7 +802,6 @@ static ASTNode* parse_primary(void) {
             return node;
         }
         
-        // Variable
         node = create_node(AST_VARIABLE);
         strncpy(node->var_name, name, MAX_TOKEN_LEN - 1);
         return node;
@@ -830,7 +822,6 @@ static ASTNode* parse_primary(void) {
         ASTNode *size_expr = parse_expression();
         expect(TOK_RPAREN);
         
-        // Create array literal node
         node = create_node(AST_ARRAY_LITERAL);
         node->array_literal.count = 1;
         node->array_literal.elements = (ASTNode**)malloc(sizeof(ASTNode*));
@@ -888,7 +879,7 @@ static ASTNode* parse_primary(void) {
     }
     
     report_error("Expected expression");
-    return create_node(AST_INT_LITERAL); // Return dummy node
+    return create_node(AST_INT_LITERAL);
 }
 
 static ASTNode* parse_multiplicative(void) {
@@ -998,7 +989,6 @@ static ASTNode* parse_block(void) {
 }
 
 static ASTNode* parse_statement(void) {
-    // Function definition
     if (current_token.type == TOK_FN) {
         next_token();
         
@@ -1035,10 +1025,9 @@ static ASTNode* parse_statement(void) {
         func->body = parse_block();
         expect(TOK_SEMI);
         
-        return NULL; // Function definitions don't produce AST nodes in statement list
+        return NULL;
     }
     
-    // Return
     if (current_token.type == TOK_RN) {
         next_token();
         ASTNode *node = create_node(AST_RETURN);
@@ -1047,21 +1036,18 @@ static ASTNode* parse_statement(void) {
         return node;
     }
     
-    // Break
     if (current_token.type == TOK_BREAK) {
         next_token();
         expect(TOK_SEMI);
         return create_node(AST_BREAK);
     }
     
-    // Continue
     if (current_token.type == TOK_CONTINUE) {
         next_token();
         expect(TOK_SEMI);
         return create_node(AST_CONTINUE);
     }
     
-    // Output
     if (current_token.type == TOK_OUT) {
         next_token();
         expect(TOK_LPAREN);
@@ -1072,7 +1058,6 @@ static ASTNode* parse_statement(void) {
         return node;
     }
     
-    // Input
     if (current_token.type == TOK_IN) {
         next_token();
         expect(TOK_LPAREN);
@@ -1086,7 +1071,6 @@ static ASTNode* parse_statement(void) {
         strncpy(var_name, current_token.ident, MAX_TOKEN_LEN - 1);
         next_token();
         
-        // Check for array element input: in(arr[i])
         if (current_token.type == TOK_LBRACKET) {
             next_token();
             ASTNode *index = parse_expression();
@@ -1094,12 +1078,10 @@ static ASTNode* parse_statement(void) {
             expect(TOK_RPAREN);
             expect(TOK_SEMI);
             
-            // Create array assignment node with IN as value
             ASTNode *node = create_node(AST_ARRAY_ASSIGN);
             strncpy(node->array_assign.var_name, var_name, MAX_TOKEN_LEN - 1);
             node->array_assign.index = index;
             
-            // Create special IN node as the value
             ASTNode *in_node = create_node(AST_IN);
             strncpy(in_node->in_stmt.var_name, "__temp_in", MAX_TOKEN_LEN - 1);
             node->array_assign.value = in_node;
@@ -1107,7 +1089,6 @@ static ASTNode* parse_statement(void) {
             return node;
         }
         
-        // Regular variable input
         ASTNode *node = create_node(AST_IN);
         strncpy(node->in_stmt.var_name, var_name, MAX_TOKEN_LEN - 1);
         expect(TOK_RPAREN);
@@ -1115,7 +1096,6 @@ static ASTNode* parse_statement(void) {
         return node;
     }
     
-    // If statement
     if (current_token.type == TOK_IF) {
         next_token();
         expect(TOK_LPAREN);
@@ -1137,14 +1117,12 @@ static ASTNode* parse_statement(void) {
         return node;
     }
     
-    // For loop
     if (current_token.type == TOK_FOR) {
         next_token();
         expect(TOK_LPAREN);
         
         ASTNode *node = create_node(AST_FOR);
         
-        // Initialization
         if (current_token.type == TOK_IDENT) {
             char var_name[MAX_TOKEN_LEN];
             strncpy(var_name, current_token.ident, MAX_TOKEN_LEN - 1);
@@ -1165,11 +1143,9 @@ static ASTNode* parse_statement(void) {
         
         expect(TOK_SEMI);
         
-        // Condition
         node->for_stmt.condition = parse_expression();
         expect(TOK_SEMI);
         
-        // Increment
         if (current_token.type == TOK_IDENT) {
             char var_name[MAX_TOKEN_LEN];
             strncpy(var_name, current_token.ident, MAX_TOKEN_LEN - 1);
@@ -1200,14 +1176,12 @@ static ASTNode* parse_statement(void) {
         
         expect(TOK_RPAREN);
         
-        // Body
         node->for_stmt.body = parse_block();
         expect(TOK_SEMI);
         
         return node;
     }
     
-    // While loop
     if (current_token.type == TOK_WHILE) {
         next_token();
         expect(TOK_LPAREN);
@@ -1221,21 +1195,17 @@ static ASTNode* parse_statement(void) {
         return node;
     }
     
-    // HTTP request
     if (current_token.type == TOK_HTTP) {
         next_token();
         expect(TOK_LPAREN);
         
         ASTNode *node = create_node(AST_HTTP);
         
-        // Method
         node->http_stmt.method = parse_expression();
         expect(TOK_COMMA);
         
-        // URL
         node->http_stmt.url = parse_expression();
         
-        // Optional body
         if (current_token.type == TOK_COMMA) {
             next_token();
             node->http_stmt.body = parse_expression();
@@ -1249,13 +1219,11 @@ static ASTNode* parse_statement(void) {
         return node;
     }
     
-    // Assignment or increment/decrement
     if (current_token.type == TOK_IDENT) {
         char var_name[MAX_TOKEN_LEN];
         strncpy(var_name, current_token.ident, MAX_TOKEN_LEN - 1);
         next_token();
         
-        // Array assignment
         if (current_token.type == TOK_LBRACKET) {
             next_token();
             ASTNode *index = parse_expression();
@@ -1270,7 +1238,6 @@ static ASTNode* parse_statement(void) {
             return node;
         }
         
-        // Increment
         if (current_token.type == TOK_PLUSPLUS) {
             next_token();
             expect(TOK_SEMI);
@@ -1279,7 +1246,6 @@ static ASTNode* parse_statement(void) {
             return node;
         }
         
-        // Decrement
         if (current_token.type == TOK_MINUSMINUS) {
             next_token();
             expect(TOK_SEMI);
@@ -1288,7 +1254,6 @@ static ASTNode* parse_statement(void) {
             return node;
         }
         
-        // Assignment
         if (current_token.type == TOK_ASSIGN) {
             next_token();
             ASTNode *node = create_node(AST_ASSIGN);
@@ -1299,21 +1264,19 @@ static ASTNode* parse_statement(void) {
         }
     }
     
-    // Empty statement
     if (current_token.type == TOK_SEMI) {
         next_token();
         return NULL;
     }
     
     report_error("Invalid statement");
-    next_token(); // Try to recover
+    next_token();
     return NULL;
 }
 
 /* ==================== HTTP HELPER ==================== */
 #ifdef _WIN32
 static void http_request_win(const char *method, const char *url, const char *body) {
-    // Parse URL: https://host/path veya http://host/path
     bool is_https = (strncmp(url, "https://", 8) == 0);
     bool is_http = (strncmp(url, "http://", 7) == 0);
     
@@ -1329,22 +1292,18 @@ static void http_request_win(const char *method, const char *url, const char *bo
     wchar_t path[1024];
     wchar_t method_w[16];
     
-    // Host parse
     int host_len = path_start ? (path_start - host_start) : strlen(host_start);
     MultiByteToWideChar(CP_UTF8, 0, host_start, host_len, host, 256);
     host[host_len] = 0;
     
-    // Path parse
     if (path_start) {
         MultiByteToWideChar(CP_UTF8, 0, path_start, -1, path, 1024);
     } else {
         wcscpy(path, L"/");
     }
     
-    // Method convert
     MultiByteToWideChar(CP_UTF8, 0, method, -1, method_w, 16);
     
-    // WinHTTP session
     HINTERNET session = WinHttpOpen(
         L"NaC/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
@@ -1385,11 +1344,9 @@ static void http_request_win(const char *method, const char *url, const char *bo
         return;
     }
     
-    // Redirect support
     DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
     WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &redirect, sizeof(redirect));
     
-    // Send request
     const wchar_t *headers = body ? L"Content-Type: application/json\r\n" : NULL;
     BOOL result = WinHttpSendRequest(
         request,
@@ -1411,7 +1368,6 @@ static void http_request_win(const char *method, const char *url, const char *bo
     
     WinHttpReceiveResponse(request, NULL);
     
-    // Read response
     DWORD size = 0;
     do {
         DWORD downloaded = 0;
@@ -1432,8 +1388,7 @@ static void http_request_win(const char *method, const char *url, const char *bo
     WinHttpCloseHandle(session);
 }
 #else
-// libcurl callback function
-static size_t curl_write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t total_size = size * nmemb;
     printf("%.*s", (int)total_size, (char*)contents);
     return total_size;
@@ -1446,16 +1401,13 @@ static void http_request_unix(const char *method, const char *url, const char *b
         return;
     }
     
-    // Set URL
     curl_easy_setopt(curl, CURLOPT_URL, url);
     
-    // Set method
     if (strcmp(method, "POST") == 0) {
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
         if (body) {
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
             
-            // Set JSON header
             struct curl_slist *headers = NULL;
             headers = curl_slist_append(headers, "Content-Type: application/json");
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -1471,16 +1423,9 @@ static void http_request_unix(const char *method, const char *url, const char *b
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
     }
     
-    // Set user agent
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "NaC/1.0");
-    
-    // Follow redirects
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    
-    // Set write callback
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_callback);
-    
-    // Perform request
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     CURLcode res = curl_easy_perform(curl);
     
     if (res != CURLE_OK) {
@@ -1514,7 +1459,6 @@ static bool is_builtin_function(const char *name) {
 }
 
 static Value call_builtin_function(const char *name, Value *args, int arg_count) {
-    // Math functions
     if (strcmp(name, "sqrt") == 0) {
         if (arg_count != 1) {
             report_error("sqrt() requires 1 argument");
@@ -1614,7 +1558,6 @@ static Value call_builtin_function(const char *name, Value *args, int arg_count)
         return make_float(exp(to_float(args[0])));
     }
     
-    // String functions
     if (strcmp(name, "length") == 0) {
         if (arg_count != 1) {
             report_error("length() requires 1 argument");
@@ -1672,10 +1615,8 @@ static Value call_builtin_function(const char *name, Value *args, int arg_count)
             return make_string("");
         }
         const char *str = args[0].str_val;
-        // Find first non-whitespace
         int start = 0;
         while (str[start] && isspace(str[start])) start++;
-        // Find last non-whitespace
         int end = strlen(str) - 1;
         while (end >= start && isspace(str[end])) end--;
         
@@ -1774,7 +1715,6 @@ static Value call_builtin_function(const char *name, Value *args, int arg_count)
         return make_int(-1);
     }
     
-    // Array functions
     if (strcmp(name, "first") == 0) {
         if (arg_count != 1) {
             report_error("first() requires 1 argument");
@@ -1810,7 +1750,6 @@ static Value call_builtin_function(const char *name, Value *args, int arg_count)
         }
         
         Value arr = copy_value(args[0]);
-        // Reverse in place
         for (int i = 0; i < arr.array_val.size / 2; i++) {
             int j = arr.array_val.size - 1 - i;
             Value temp = arr.array_val.elements[i];
@@ -1882,7 +1821,6 @@ static Value call_builtin_function(const char *name, Value *args, int arg_count)
         return make_string(result);
     }
     
-    // File I/O functions
     if (strcmp(name, "read") == 0) {
         if (arg_count != 1) {
             report_error("read() requires 1 argument (filename)");
@@ -1934,7 +1872,6 @@ static Value call_builtin_function(const char *name, Value *args, int arg_count)
         if (args[1].type == TYPE_STRING) {
             content = args[1].str_val;
         } else {
-            // Convert to string
             static char temp_str[64];
             if (args[1].type == TYPE_INT) {
                 snprintf(temp_str, sizeof(temp_str), "%d", args[1].int_val);
@@ -1974,7 +1911,6 @@ static Value call_builtin_function(const char *name, Value *args, int arg_count)
         if (args[1].type == TYPE_STRING) {
             content = args[1].str_val;
         } else {
-            // Convert to string
             static char temp_str[64];
             if (args[1].type == TYPE_INT) {
                 snprintf(temp_str, sizeof(temp_str), "%d", args[1].int_val);
@@ -2003,8 +1939,6 @@ static Value call_builtin_function(const char *name, Value *args, int arg_count)
             report_error("push() requires 2 arguments (array, value)");
             return make_int(0);
         }
-        // Note: This needs to modify the original array, which requires special handling
-        // For now, return the array size
         return make_int(args[0].array_val.size);
     }
     
@@ -2020,7 +1954,6 @@ static Value call_builtin_function(const char *name, Value *args, int arg_count)
         return args[0].array_val.elements[args[0].array_val.size - 1];
     }
     
-    // Function not found - shouldn't reach here if is_builtin_function is checked first
     report_error("Unknown built-in function");
     return make_int(0);
 }
@@ -2196,20 +2129,17 @@ static Value eval_node(ASTNode *node) {
         }
         
         case AST_CALL: {
-            // Evaluate arguments FIRST (before any function lookup)
             Value *arg_values = (Value*)malloc(sizeof(Value) * node->call.arg_count);
             for (int i = 0; i < node->call.arg_count; i++) {
                 arg_values[i] = eval_node(node->call.args[i]);
             }
             
-            // Check for built-in functions first
             if (is_builtin_function(node->call.func_name)) {
                 Value result = call_builtin_function(node->call.func_name, arg_values, node->call.arg_count);
                 free(arg_values);
                 return result;
             }
             
-            // Find user-defined function
             Function *func = NULL;
             for (int i = 0; i < func_count; i++) {
                 if (strcmp(functions[i].name, node->call.func_name) == 0) {
@@ -2232,7 +2162,6 @@ static Value eval_node(ASTNode *node) {
                 return make_int(0);
             }
             
-            // Create new scope
             if (call_depth >= MAX_CALL_DEPTH) {
                 free(arg_values);
                 report_error("Stack overflow");
@@ -2242,20 +2171,17 @@ static Value eval_node(ASTNode *node) {
             call_stack_vars[call_depth] = create_var_table();
             call_depth++;
             
-            // Bind parameters in new scope
             for (int i = 0; i < func->param_count; i++) {
                 set_var(func->params[i], arg_values[i]);
             }
             free(arg_values);
             
-            // Execute function
             should_return = false;
             eval_node(func->body);
             
             Value result = return_value;
             should_return = false;
             
-            // Clean up scope
             call_depth--;
             free_var_table(call_stack_vars[call_depth]);
             call_stack_vars[call_depth] = NULL;
@@ -2282,12 +2208,10 @@ static Value eval_node(ASTNode *node) {
         }
         
         case AST_FOR: {
-            // Initialize
             if (node->for_stmt.init) {
                 eval_node(node->for_stmt.init);
             }
             
-            // Loop
             while (1) {
                 Value condition = eval_node(node->for_stmt.condition);
                 if (!to_bool(condition)) break;
@@ -2357,7 +2281,7 @@ static Value eval_node(ASTNode *node) {
         
         case AST_RETURN: {
             Value val = eval_node(node->return_stmt.value);
-            return_value = copy_value(val);  // CRITICAL: Deep copy for arrays!
+            return_value = copy_value(val);
             should_return = true;
             return return_value;
         }
@@ -2379,10 +2303,8 @@ static Value eval_node(ASTNode *node) {
         case AST_IN: {
             char input[MAX_STRING_LEN];
             if (fgets(input, MAX_STRING_LEN, stdin)) {
-                // Remove newline
                 input[strcspn(input, "\n")] = '\0';
                 
-                // Try to parse as number
                 char *endptr;
                 long int_val = strtol(input, &endptr, 10);
                 Value result;
@@ -2397,7 +2319,6 @@ static Value eval_node(ASTNode *node) {
                     }
                 }
                 
-                // Only set variable if not __temp_in (used for array element input)
                 if (strcmp(node->in_stmt.var_name, "__temp_in") != 0) {
                     set_var(node->in_stmt.var_name, result);
                 }
@@ -2441,7 +2362,6 @@ static Value eval_node(ASTNode *node) {
         
         case AST_ARRAY_LITERAL: {
             if (node->array_literal.count == 1) {
-                // array(n) syntax
                 Value size_val = eval_node(node->array_literal.elements[0]);
                 int size = to_int(size_val);
                 if (size < 0 || size > MAX_ARRAY_SIZE) {
@@ -2450,7 +2370,6 @@ static Value eval_node(ASTNode *node) {
                 }
                 return make_array(size);
             } else {
-                // [a, b, c] syntax
                 Value arr = make_array(node->array_literal.count);
                 for (int i = 0; i < node->array_literal.count; i++) {
                     arr.array_val.elements[i] = eval_node(node->array_literal.elements[i]);
@@ -2496,10 +2415,75 @@ static void init_interpreter(void) {
     error_count = 0;
 }
 
+void get_latest() {
+    #ifdef _WIN32
+        system("curl.exe -s -L -o latest.json https://api.github.com/repos/naclang/nac/releases/latest 2>nul");
+    #else
+        system("curl -s -L -o latest.json https://api.github.com/repos/naclang/nac/releases/latest 2>/dev/null");
+    #endif
+
+    FILE *f = fopen("latest.json", "r");
+    if (!f) {
+        strcpy(latest, "UNKNOWN");
+        return;
+    }
+
+    char buf[8192];
+    size_t len = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[len] = '\0';
+    fclose(f);
+
+    char *tag = strstr(buf, "\"tag_name\"");
+    if (!tag) {
+        strcpy(latest, "UNKNOWN");
+        remove("latest.json");
+        return;
+    }
+
+    char version[64] = {0};
+    if (sscanf(tag, "\"tag_name\": \"%63[^\"]\"", version) == 1) {
+        strcpy(latest, version);
+    } else {
+        strcpy(latest, "UNKNOWN");
+    }
+
+    remove("latest.json");
+}
+
+static int compare_versions(const char *v1, const char *v2) {
+    // "NaC" prefix'ini atla
+    const char *ver1 = v1;
+    const char *ver2 = v2;
+    
+    if (strncmp(ver1, "NaC", 3) == 0) ver1 += 3;
+    if (strncmp(ver2, "NaC", 3) == 0) ver2 += 3;
+    
+    int major1 = 0, minor1 = 0, patch1 = 0;
+    int major2 = 0, minor2 = 0, patch2 = 0;
+    
+    sscanf(ver1, "%d.%d.%d", &major1, &minor1, &patch1);
+    sscanf(ver2, "%d.%d.%d", &major2, &minor2, &patch2);
+    
+    if (major1 != major2) return (major1 > major2) ? 1 : -1;
+    if (minor1 != minor2) return (minor1 > minor2) ? 1 : -1;
+    if (patch1 != patch2) return (patch1 > patch2) ? 1 : -1;
+    
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        printf("NaC Language Interpreter v3.1.0 \n");
+        printf("NaC Language Interpreter (%s)\n", NAC_VERSION);
         printf("Usage: %s <file.nac>\n\n", argv[0]);
+        
+        get_latest();
+
+        if (strcmp(latest, "UNKNOWN") == 0) {
+            printf("Could not check for updates.\n");
+        } else if (compare_versions(latest, NAC_TAG) > 0) {
+            printf("There's a new version: %s (local: %s)\n", latest, NAC_TAG);
+        }
+
         return 1;
     }
     
@@ -2511,7 +2495,6 @@ int main(int argc, char *argv[]) {
     
     next_token();
     
-    // Parse and execute
     while (current_token.type != TOK_EOF) {
         ASTNode *stmt = parse_statement();
         if (stmt) {
@@ -2519,7 +2502,6 @@ int main(int argc, char *argv[]) {
             free_ast(stmt);
         }
         
-        // Stop if too many errors
         if (error_count > 10) {
             fprintf(stderr, "Too many errors, stopping execution.\n");
             break;
@@ -2533,6 +2515,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "\nExecution completed with %d error(s).\n", error_count);
         return 1;
     }
-    
+
     return 0;
 }

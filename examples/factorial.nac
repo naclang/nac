@@ -1,5 +1,6 @@
 // Example: Factorial Calculation
 // ---------------------------------------------------
+
 n = 0;
 fn factorial(n) {
     if(n <= 1) {

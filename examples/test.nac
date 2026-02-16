@@ -1,5 +1,5 @@
-// Stage 1 Complete Test Suite
-// Tests all new features added in Stage 1
+// Example: NaC Stage 1 Test Suite
+// ---------------------------------------------------
 
 out("=================================================");
 out("       NaC Language Stage 1 Test Suite");
