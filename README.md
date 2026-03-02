@@ -25,31 +25,29 @@ A lightweight, interpreted scripting language implemented in C with HTTP support
 ### Windows (MinGW)
 
 ```bash
-gcc -o nac.exe nac.c -lm -lwinhttp
+cd src
+./build.bat
 ```
 
-### Linux
+### Unix
 
 ```bash
-# Install libcurl (Ubuntu/Debian)
-sudo apt-get install libcurl4-openssl-dev
+# Ubuntu/Debian
+sudo apt install libcurl4-openssl-dev
+
+# Fedora
+sudo dnf install libcurl-devel
+
+# Arch 
+sudo pacman -Syu curl-compat
+
+# MacOS
+brew install curl
 
 # Compile
-gcc -o nac nac.c -lm -lcurl
-```
-
-Or use the build script:
-
-```bash
-chmod +x build_linux.sh
-./build_linux.sh
-```
-
-### macOS
-
-```bash
-# libcurl is usually pre-installed
-gcc -o nac nac.c -lm -lcurl
+cd src
+chmod +x build.sh
+./build.sh
 ```
 
 ---

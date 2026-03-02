@@ -6,3 +6,9 @@ http("GET", "https://api.ipify.org/?format=json");
 
 out("\n=== HTTP POST ORNEGI ===");
 http("POST", "https://httpbin.org/post", "{\"mesaj\":\"Merhaba\",\"dil\":\"NaC\"}");
+
+out("\n=== HTTP PUT ORNEGI ===");
+http("PUT", "https://httpbin.org/put", "{\"guncelleme\":\"Bu bir PUT istegi\",\"dil\":\"NaC\"}");
+
+out("\n=== HTTP DELETE ORNEGI ===");
+http("DELETE", "https://httpbin.org/delete");
