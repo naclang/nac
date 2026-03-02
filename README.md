@@ -1,4 +1,4 @@
-# NaC Language Interpreter v3.1.0
+# NaC Language Interpreter v3.2.1
 
 A lightweight, interpreted scripting language implemented in C with HTTP support. NaC (Not a C) is designed to be simple, expressive, and easy to embed for quick scripting tasks, web automation, and API testing.
 
