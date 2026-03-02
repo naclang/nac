@@ -8,7 +8,7 @@
 #include "../runtime/value.h"
 #include "../runtime/vartable.h"
 
-#define NAC_VERSION "3.2.0"
+#define NAC_VERSION "3.2.1"
 #define NAC_TAG "NaC" NAC_VERSION
 #define MAX_CALL_DEPTH 100
 
