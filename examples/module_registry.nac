@@ -1,0 +1,6 @@
+mod = moduleRequire("config");
+ok = moduleRegister("cfg", mod);
+out(ok);
+cfg = moduleGet("cfg");
+out(cfg["retry"]);
+out(length(moduleNames()));

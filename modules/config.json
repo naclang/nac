@@ -1,0 +1,5 @@
+{
+  "api_base": "https://api.example.com",
+  "retry": 3,
+  "features": ["json", "http", "modules"]
+}

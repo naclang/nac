@@ -1,23 +1,21 @@
-# NaC Language Interpreter v3.2.1
+# NaC Language Interpreter v3.3.0
 
-A lightweight, interpreted scripting language implemented in C with HTTP support. NaC (Not a C) is designed to be simple, expressive, and easy to embed for quick scripting tasks, web automation, and API testing.
+A lightweight, interpreted scripting language implemented in C with HTTP and JSON/module support. NaC (Not a C) is designed to be simple, expressive, and practical for quick scripting tasks, API testing, and data processing.
 
 ---
 
 ## Features
 
-* **Data Types:** Integers, floats, strings, arrays, maps/dictionaries.
-* **Operators:** Arithmetic (`+`, `-`, `*`, `/`, `%`), comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`), logical (`&&`, `||`, `!`).
-* **Control Flow:** `if-else`, `for` loops, **`while` loops**, `break`, `continue`.
-* **Functions:** User-defined with parameters and `rn` (return) statements.
-* **I/O:** `in()` for input, `out()` for output.
-* **Arrays:** Dynamic arrays using `array(n)` or literal `[1, 2, 3]`.
-* **Maps/Dictionaries:** Key-value collections using `map()` and index syntax `m["key"]`.
-* **HTTP Requests:** **NEW!** Built-in HTTP client (GET, POST, PUT, DELETE).
-* **Time:** `time()` returns the current Unix timestamp.
-* **Error Reporting:** Line and column-specific messages.
-* **Increment/Decrement:** `++` and `--` operators.
-* **Cross-Platform:** Works on Windows, Linux, and macOS.
+* Data types: integers, floats, strings, arrays, maps/dictionaries.
+* Operators: arithmetic, comparison, logical operators.
+* Control flow: `if-else`, `for`, `while`, `break`, `continue`.
+* Functions: user-defined with parameters and `rn` return.
+* I/O: `in()` and `out()`.
+* HTTP: `http()`, `httpRequest()`, `httpJson()`.
+* JSON: `jsonParse()`, `jsonStringify()`.
+* Modules: `moduleLoad()`, `moduleRequire()`, namespace registry APIs.
+* Error reporting with line and column.
+* Cross-platform: Windows, Linux, macOS.
 
 ---
 
@@ -39,10 +37,10 @@ sudo apt install libcurl4-openssl-dev
 # Fedora
 sudo dnf install libcurl-devel
 
-# Arch 
+# Arch
 sudo pacman -Syu curl-compat
 
-# MacOS
+# macOS
 brew install curl
 
 # Compile
@@ -55,8 +53,6 @@ chmod +x build.sh
 
 ## Usage
 
-Run a NaC script:
-
 ```bash
 # Linux/macOS
 ./nac program.nac
@@ -65,208 +61,54 @@ Run a NaC script:
 nac.exe program.nac
 ```
 
-Example `program.nac`:
-
-```nac
-fn add(a, b) {
-    rn a + b;
-};
-
-x = 10;
-y = 20;
-z = add(x, y);
-out(z);  // Output: 30
-```
-
 ---
 
-## Syntax Overview
-
-### Variables
+## HTTP + JSON Example
 
 ```nac
-x = 5;
-y = 3.14;
-name = "NaC";
+raw = httpRequest("GET", "https://api.ipify.org/?format=json");
+data = jsonParse(raw);
+out(data["ip"]);
 ```
 
-### Arrays
+## Module Example
+
+`moduleRequire(name)` loads `modules/<name>.json` and caches it in namespace registry.
 
 ```nac
-arr = array(5);  // Creates [0, 0, 0, 0, 0]
-nums = [1, 2, 3, 4];
-arr[0] = 42;
-out(arr[0]);
-```
+cfg = moduleRequire("config");
+out(cfg["api_base"]);
 
-### Maps/Dictionaries (NEW!)
-
-```nac
-m = map();
-m["name"] = "NaC";
-m["version"] = 3;
-out(m["name"]);     // Output: NaC
-out(length(m));      // Output: 2
-```
-
-Keys can be strings, integers, or floats.
-### Functions
-
-```nac
-fn greet(name) {
-    out("Hello, " + name + "!");
-};
-
-greet("Alice");  // Output: Hello, Alice!
-```
-
-Return values using `rn`:
-
-```nac
-fn square(x) {
-    rn x * x;
-};
-out(square(5));  // Output: 25
-```
-
-### Conditionals
-
-```nac
-if (x > 10) {
-    out("Greater than 10");
-} : {
-    out("10 or less");
-};
-```
-
-### For Loops
-
-```nac
-for (i = 0; i < 5; i++) {
-    out(i);
-};
-```
-
-### While Loops (NEW!)
-
-```nac
-x = 0;
-while (x < 5) {
-    out(x);
-    x++;
-};
-```
-
-With break and continue:
-
-```nac
-n = 0;
-while (n < 10) {
-    n++;
-    if (n == 3) {
-        continue;  // Skip 3
-    };
-    if (n == 7) {
-        break;     // Stop at 7
-    };
-    out(n);
-};
-```
-
-### HTTP Requests (NEW!)
-
-```nac
-// GET request
-http("GET", "https://api.ipify.org/?format=json");
-
-// POST request with JSON body
-http("POST", "https://httpbin.org/post", "{\"name\":\"John\",\"age\":30}");
-
-// PUT request
-http("PUT", "https://api.example.com/users/1", "{\"status\":\"active\"}");
-
-// DELETE request
-http("DELETE", "https://api.example.com/users/1");
-```
-
-HTTP with loops:
-
-```nac
-i = 0;
-while (i < 3) {
-    out("Request #" + i);
-    http("GET", "https://api.ipify.org/?format=json");
-    i++;
-};
-```
-
-**Platform Support:**
-- **Windows**: Uses WinHTTP API
-- **Linux/macOS**: Uses libcurl
-- Supports HTTP and HTTPS
-- Automatic redirect following
-- Response printed to stdout
-
-### I/O
-
-```nac
-in(x);
-out(x);
-```
-
-Input supports integers, floats, and strings automatically.
-
-### Time
-
-```nac
-current = time();
-out(current);  // Prints current Unix timestamp
+ok = moduleRegister("runtimeCfg", cfg);
+out(moduleNames());
 ```
 
 ---
 
 ## Built-in Functions
 
-### Math Functions
-- `sqrt(x)` - Square root
-- `pow(x, y)` - Power
-- `sin(x)`, `cos(x)`, `tan(x)` - Trigonometry
-- `abs(x)` - Absolute value
-- `floor(x)`, `ceil(x)`, `round(x)` - Rounding
-- `log(x)`, `exp(x)` - Logarithm and exponential
+### JSON
+- `jsonParse(json)`
+- `jsonStringify(value)`
 
-### String Functions
-- `length(str)` - String/array length
-- `upper(str)`, `lower(str)` - Case conversion
-- `trim(str)` - Remove whitespace
-- `substr(str, start, len)` - Substring
-- `indexOf(str, search)` - Find substring
-- `replace(str, old, new)` - Replace text
+### HTTP
+- `http(method, url, body?)`
+- `httpRequest(method, url, body?)`
+- `httpJson(method, url, body?)`
 
-### Array Functions
-- `push(arr, val)` - Add element
-- `pop(arr)` - Remove last element
-- `first(arr)`, `last(arr)` - Get first/last
-- `reverse(arr)` - Reverse array
-- `slice(arr, start, end)` - Get slice
-- `join(arr, sep)` - Join to string
+### Modules
+- `moduleLoad(path)`
+- `moduleRegister(name, module)`
+- `moduleGet(name)`
+- `moduleRequire(name)`
+- `moduleNames()`
 
-### File Functions
-- `read(filename)` - Read file
-- `write(filename, content)` - Write file
-- `append(filename, content)` - Append to file
-
----
-
-## Error Handling
-
-NaC reports errors with line and column numbers:
-
-```
-Error (Line 3, Column 7): Undefined variable: x
-```
-
-Execution stops after 10 errors to prevent excessive runtime issues.
+### Existing Core Functions
+- Math: `sqrt`, `pow`, `sin`, `cos`, `tan`, `abs`, `floor`, `ceil`, `round`, `log`, `exp`
+- String: `length`, `upper`, `lower`, `trim`, `replace`, `substr`, `indexOf`
+- Array: `push`, `pop`, `first`, `last`, `reverse`, `slice`, `join`
+- File: `read`, `write`, `append`
+- Map: `map`
 
 ---
 
@@ -277,5 +119,4 @@ Execution stops after 10 errors to prevent excessive runtime issues.
 * Maximum call stack depth: 100
 * Maximum array size: 10,000 elements
 * Strings limited to 1024 characters
-* HTTP timeout: Platform default (WinHTTP or libcurl)
 

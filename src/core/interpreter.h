@@ -8,7 +8,7 @@
 #include "../runtime/value.h"
 #include "../runtime/vartable.h"
 
-#define NAC_VERSION "3.2.1"
+#define NAC_VERSION "3.3.0"
 #define NAC_TAG "NaC" NAC_VERSION
 #define MAX_CALL_DEPTH 100
 
@@ -43,3 +43,4 @@ void get_latest(void);
 int compare_versions(const char *v1, const char *v2);
 
 #endif
+

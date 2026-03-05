@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "../builtin/builtin.h"
+#include "../builtin/extended_builtin.h"
 #include "../core/interpreter.h"
 #include "../net/http.h"
 #include "../parser/parser.h"
@@ -242,6 +243,12 @@ Value eval_node(ASTNode *node) {
 
             if (is_builtin_function(node->call.func_name)) {
                 Value result = call_builtin_function(node->call.func_name, arg_values, node->call.arg_count);
+                free(arg_values);
+                return result;
+            }
+
+            if (is_extended_builtin(node->call.func_name)) {
+                Value result = call_extended_builtin(node->call.func_name, arg_values, node->call.arg_count);
                 free(arg_values);
                 return result;
             }
@@ -488,3 +495,7 @@ Value eval_node(ASTNode *node) {
             return make_int(0);
     }
 }
+
+
+
+

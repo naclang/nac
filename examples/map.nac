@@ -1,11 +1,9 @@
 m = map();
 m["name"] = "NaC";
 m["year"] = 2026;
-m[1] = "one";
 m[3.14] = "pi";
 
 out(m["name"]);
 out(m["year"]);
-out(m[1]);
 out(m[3.14]);
 out(length(m));
