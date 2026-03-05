@@ -1,19 +1,5 @@
 # **NaC Language Roadmap**
 
-## **Stage 2 - Network and Web API Support (Completed)**
-
-Objective: To make NaC usable in web and network applications.
-
-1. **JSON support** [Done]
-   * Parse JSON string -> NaC objects (`jsonParse`)
-   * Stringify NaC objects -> JSON string (`jsonStringify`)
-   * Integration with HTTP responses (`httpRequest`, `httpJson`)
-
-2. **Package manager / module system** [Done]
-   * File-based Module System (`moduleLoad`, `moduleRequire`)
-   * Namespace Management (`moduleRegister`, `moduleGet`, `moduleNames`)
-   * Local Repository Manager (`modules/<name>.json` via `moduleRequire`)
-
 ## **Stage 3: Advanced Core & Asynchrony**
 
 1. **Async / Concurrent Architecture**
