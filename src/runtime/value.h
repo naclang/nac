@@ -9,7 +9,8 @@ typedef enum {
     TYPE_INT,
     TYPE_FLOAT,
     TYPE_STRING,
-    TYPE_ARRAY
+    TYPE_ARRAY,
+    TYPE_MAP
 } ValueType;
 
 typedef struct Value {
@@ -23,6 +24,12 @@ typedef struct Value {
             int size;
             int capacity;
         } array_val;
+        struct {
+            char **keys;
+            struct Value *values;
+            int size;
+            int capacity;
+        } map_val;
     };
 } Value;
 
@@ -30,6 +37,7 @@ Value make_int(int v);
 Value make_float(double v);
 Value make_string(const char *s);
 Value make_array(int size);
+Value make_map(void);
 
 double to_float(Value v);
 int to_int(Value v);
@@ -38,5 +46,8 @@ int to_bool(Value v);
 void print_value(Value v);
 Value copy_value(Value v);
 void free_value(Value *v);
+
+Value *map_get(Value *map, const char *key);
+void map_set(Value *map, const char *key, Value value);
 
 #endif

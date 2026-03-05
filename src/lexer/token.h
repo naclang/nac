@@ -52,6 +52,8 @@ typedef enum {
 
 typedef struct {
     NaCTokenType type;
+    int line;
+    int col;
     union {
         int int_val;
         double float_val;

@@ -1,45 +1,28 @@
 # **NaC Language Roadmap**
 
-## **Stage 1 – Basic Language Development** (v3) - IN PROGRESS
+## **Stage 1 - Basic Language Development** (v3) - COMPLETED
 
 Objective: To facilitate and improve the reliability of basic language use.
 
-**Remaining Tasks:**
+**Completed in this update:**
 
-1. **Better language**
-   * Modular compilation
-   * Add Structures (structs) 
-   * Better scoping
-      * True lexical scoping
-      * Nested blocksI
-   * Debugging support
-      * Stack traces
-      * Breakpoints
-
-2. **Add maps/dictionaries**
-   * Maps/dictionaries (`map[key] = value`)
-
-3. **Optimize lexer**
-   * Build token stream once (instead of on-demand)
-   * Improves performance for large programs
-
-4. **Optional: Type annotations**
-   * `int`, `float`, `string`, `array` (static hints, not enforced yet)
+1. **Maps/dictionaries added**
+   * Create maps with `map()`
+   * Read/write with index syntax (`m[key] = value`, `m[key]`)
+   * `length(map)` support
 
 ---
 
-## **Stage 2 – Network and Web API Support** (v4)
+## **Stage 2 - Network and Web API Support** (v4)
 
 Objective: To make NaC usable in web and network applications.
 
-2. **JSON support**
-
-   * Parse JSON string → NaC objects
-   * Stringify NaC objects → JSON string
+1. **JSON support**
+   * Parse JSON string -> NaC objects
+   * Stringify NaC objects -> JSON string
    * Integration with HTTP responses
 
-3. **Optional: Async / concurrent requests**
-
+2. **Optional: Async / concurrent requests**
    * Non-blocking HTTP requests
    * Callbacks or promise-like structure
 

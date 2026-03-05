@@ -11,6 +11,26 @@
 #include "../util/error.h"
 #include "vartable.h"
 
+static int key_from_value(Value key_val, char *buffer, size_t buffer_size) {
+    if (key_val.type == TYPE_STRING) {
+        strncpy(buffer, key_val.str_val, buffer_size - 1);
+        buffer[buffer_size - 1] = '\0';
+        return 1;
+    }
+
+    if (key_val.type == TYPE_INT) {
+        snprintf(buffer, buffer_size, "%d", key_val.int_val);
+        return 1;
+    }
+
+    if (key_val.type == TYPE_FLOAT) {
+        snprintf(buffer, buffer_size, "%g", key_val.float_val);
+        return 1;
+    }
+
+    return 0;
+}
+
 Value eval_node(ASTNode *node) {
     if (!node) return make_int(0);
 
@@ -38,23 +58,40 @@ Value eval_node(ASTNode *node) {
         case AST_ARRAY_ACCESS: {
             Value *arr = get_var(node->array_access.var_name);
             if (!arr) {
-                report_error("Undefined array variable");
-                return make_int(0);
-            }
-            if (arr->type != TYPE_ARRAY) {
-                report_error("Variable is not an array");
+                report_error("Undefined indexed variable");
                 return make_int(0);
             }
 
             Value idx_val = eval_node(node->array_access.index);
-            int idx = to_int(idx_val);
 
-            if (idx < 0 || idx >= arr->array_val.size) {
-                report_error("Array index out of bounds");
-                return make_int(0);
+            if (arr->type == TYPE_ARRAY) {
+                int idx = to_int(idx_val);
+
+                if (idx < 0 || idx >= arr->array_val.size) {
+                    report_error("Array index out of bounds");
+                    return make_int(0);
+                }
+
+                return arr->array_val.elements[idx];
             }
 
-            return arr->array_val.elements[idx];
+            if (arr->type == TYPE_MAP) {
+                char key[MAX_STRING_LEN];
+                if (!key_from_value(idx_val, key, sizeof(key))) {
+                    report_error("Map key must be int, float, or string");
+                    return make_int(0);
+                }
+
+                Value *found = map_get(arr, key);
+                if (!found) {
+                    report_error("Map key not found");
+                    return make_int(0);
+                }
+                return *found;
+            }
+
+            report_error("Variable is not indexable");
+            return make_int(0);
         }
 
         case AST_BINARY_OP: {
@@ -161,23 +198,40 @@ Value eval_node(ASTNode *node) {
 
         case AST_ARRAY_ASSIGN: {
             Value *arr = get_var(node->array_assign.var_name);
-            if (!arr || arr->type != TYPE_ARRAY) {
-                report_error("Variable is not an array");
+            if (!arr) {
+                report_error("Undefined indexed variable");
                 return make_int(0);
             }
 
             Value idx_val = eval_node(node->array_assign.index);
-            int idx = to_int(idx_val);
+            Value val = eval_node(node->array_assign.value);
 
-            if (idx < 0 || idx >= arr->array_val.size) {
-                report_error("Array index out of bounds");
-                return make_int(0);
+            if (arr->type == TYPE_ARRAY) {
+                int idx = to_int(idx_val);
+
+                if (idx < 0 || idx >= arr->array_val.size) {
+                    report_error("Array index out of bounds");
+                    return make_int(0);
+                }
+
+                free_value(&arr->array_val.elements[idx]);
+                arr->array_val.elements[idx] = copy_value(val);
+                return val;
             }
 
-            Value val = eval_node(node->array_assign.value);
-            free_value(&arr->array_val.elements[idx]);
-            arr->array_val.elements[idx] = copy_value(val);
-            return val;
+            if (arr->type == TYPE_MAP) {
+                char key[MAX_STRING_LEN];
+                if (!key_from_value(idx_val, key, sizeof(key))) {
+                    report_error("Map key must be int, float, or string");
+                    return make_int(0);
+                }
+
+                map_set(arr, key, val);
+                return val;
+            }
+
+            report_error("Variable is not indexable");
+            return make_int(0);
         }
 
         case AST_CALL: {

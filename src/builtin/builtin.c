@@ -14,7 +14,7 @@ bool is_builtin_function(const char *name) {
         "length", "upper", "lower", "push", "pop",
         "trim", "replace", "substr", "indexOf",
         "first", "last", "reverse", "slice", "join",
-        "read", "write", "append"
+        "read", "write", "append", "map"
     };
     int builtin_count = sizeof(builtins) / sizeof(builtins[0]);
     for (int i = 0; i < builtin_count; i++) {
@@ -134,6 +134,8 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             return make_int(strlen(args[0].str_val));
         } else if (args[0].type == TYPE_ARRAY) {
             return make_int(args[0].array_val.size);
+        } else if (args[0].type == TYPE_MAP) {
+            return make_int(args[0].map_val.size);
         }
         return make_int(0);
     }
@@ -501,6 +503,14 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
         return make_int(strlen(content));
     }
 
+    if (strcmp(name, "map") == 0) {
+        if (arg_count != 0) {
+            report_error("map() requires 0 arguments");
+            return make_map();
+        }
+        return make_map();
+    }
+
     if (strcmp(name, "push") == 0) {
         if (arg_count != 2) {
             report_error("push() requires 2 arguments (array, value)");
@@ -524,3 +534,5 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
     report_error("Unknown built-in function");
     return make_int(0);
 }
+
+

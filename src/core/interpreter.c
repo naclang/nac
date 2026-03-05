@@ -47,6 +47,7 @@ void set_source_code(char *source) {
 }
 
 int run_interpreter(void) {
+    init_lexer();
     next_token();
 
     while (current_token.type != TOK_EOF) {
@@ -72,5 +73,6 @@ int run_interpreter(void) {
 
 void shutdown_interpreter(void) {
     free(code);
+    free_lexer();
     free_var_table(global_vars);
 }

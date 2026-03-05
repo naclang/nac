@@ -6,12 +6,13 @@ A lightweight, interpreted scripting language implemented in C with HTTP support
 
 ## Features
 
-* **Data Types:** Integers, floats, strings, arrays.
+* **Data Types:** Integers, floats, strings, arrays, maps/dictionaries.
 * **Operators:** Arithmetic (`+`, `-`, `*`, `/`, `%`), comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`), logical (`&&`, `||`, `!`).
 * **Control Flow:** `if-else`, `for` loops, **`while` loops**, `break`, `continue`.
 * **Functions:** User-defined with parameters and `rn` (return) statements.
 * **I/O:** `in()` for input, `out()` for output.
 * **Arrays:** Dynamic arrays using `array(n)` or literal `[1, 2, 3]`.
+* **Maps/Dictionaries:** Key-value collections using `map()` and index syntax `m["key"]`.
 * **HTTP Requests:** **NEW!** Built-in HTTP client (GET, POST, PUT, DELETE).
 * **Time:** `time()` returns the current Unix timestamp.
 * **Error Reporting:** Line and column-specific messages.
@@ -98,6 +99,17 @@ arr[0] = 42;
 out(arr[0]);
 ```
 
+### Maps/Dictionaries (NEW!)
+
+```nac
+m = map();
+m["name"] = "NaC";
+m["version"] = 3;
+out(m["name"]);     // Output: NaC
+out(length(m));      // Output: 2
+```
+
+Keys can be strings, integers, or floats.
 ### Functions
 
 ```nac
@@ -266,3 +278,4 @@ Execution stops after 10 errors to prevent excessive runtime issues.
 * Maximum array size: 10,000 elements
 * Strings limited to 1024 characters
 * HTTP timeout: Platform default (WinHTTP or libcurl)
+
