@@ -1,4 +1,5 @@
 #include "http.h"
+#include <stddef.h>
 
 #ifdef _WIN32
 

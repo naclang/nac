@@ -18,7 +18,7 @@ if "%SOURCES%"=="" (
 )
 
 :: Derle (çıktı project\ içine)
-gcc %SOURCES% -Isrc -o nac.exe -lwinhttp
+gcc %SOURCES% -Isrc -o nac.exe -lwinhttp -lm
 
 if %ERRORLEVEL% EQU 0 (
     echo [SUCCESS] nac.exe created successfully.

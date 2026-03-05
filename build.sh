@@ -14,7 +14,7 @@ if [ -z "$SOURCES" ]; then
 fi
 
 # Derle (çıktı project/ içine)
-gcc $SOURCES -Isrc -o nac -lcurl
+gcc $SOURCES -Isrc -o nac -lcurl -lm
 
 if [ $? -eq 0 ]; then
     echo -e "\033[0;32m[SUCCESS]\033[0m nac binary created successfully."
