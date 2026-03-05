@@ -24,7 +24,6 @@ A lightweight, interpreted scripting language implemented in C with HTTP and JSO
 ### Windows (MinGW)
 
 ```bash
-cd src
 ./build.bat
 ```
 
@@ -44,7 +43,6 @@ sudo pacman -Syu curl-compat
 brew install curl
 
 # Compile
-cd src
 chmod +x build.sh
 ./build.sh
 ```
