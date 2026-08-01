@@ -1,0 +1,23 @@
+// Example: Number Guessing Game
+// ---------------------------------------------------
+
+a = 1 + (time() % 100);
+
+for(i = 0; i <= 10; i++) { 
+    out("Tahmininizi girin (1-100):");
+    in(t);
+
+    if(t == a) {
+        out("Tebrikler! Sayiyi bildiniz.");
+        break;
+    };
+    if(t < a) {
+        out("Daha buyuk bir sayi deneyin.");
+    } : {
+        out("Daha kucuk bir sayi deneyin.");
+    };
+};
+
+if(t != a) {
+    out("Uzgunum, hakkiniz bitti. Sayim: " + a);
+};

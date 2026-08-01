@@ -1,0 +1,41 @@
+// examples/cli_tool.nac
+// A tiny CLI tool written in NaC, showing args(), env() and exit().
+//
+// Run:   nac examples/cli_tool.nac greet Ayse
+//        nac examples/cli_tool.nac add 4 5
+//        nac examples/cli_tool.nac
+
+cliArgs = args();
+
+if (length(cliArgs) == 0) {
+    out("Kullanim:");
+    out("  nac cli_tool.nac greet <isim>");
+    out("  nac cli_tool.nac add <a> <b>");
+    exit(1);
+};
+
+command = cliArgs[0];
+
+if (command == "greet") {
+    name = "Dunya";
+    if (length(cliArgs) > 1) {
+        name = cliArgs[1];
+    };
+    user = env("USER");
+    out("Merhaba, " + name + "! (calistiran: " + user + ")");
+    exit(0);
+};
+
+if (command == "add") {
+    if (length(cliArgs) < 3) {
+        out("Hata: add komutu iki sayi bekler.");
+        exit(1);
+    };
+    a = toInt(cliArgs[1]);
+    b = toInt(cliArgs[2]);
+    out(a + " + " + b + " = " + (a + b));
+    exit(0);
+};
+
+out("Bilinmeyen komut: " + command);
+exit(1);

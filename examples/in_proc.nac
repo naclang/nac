@@ -1,0 +1,21 @@
+// Example: User Input and Processing
+// ---------------------------------------------------
+
+out("How many numbers will you enter?");
+in(count);
+
+user_numbers = array(count);
+out("Enter the numbers:");
+
+for(i = 0; i < count; i++) {
+    out("Num " + (i + 1) + ":");
+    in(user_numbers[i]);
+};
+
+total_sum = 0;
+for(i = 0; i < count; i++) {
+    total_sum = total_sum + user_numbers[i];
+};
+
+average = total_sum / count;
+out("Average:" + average);

@@ -1,0 +1,43 @@
+// Test: compound assignment operators (+= -= *= /=)
+
+// Plain variables
+x = 10;
+x += 5;
+out(x);   // 15
+x -= 3;
+out(x);   // 12
+x *= 2;
+out(x);   // 24
+x /= 4;
+out(x);   // 6
+
+// String concatenation via +=
+s = "Hello";
+s += ", world!";
+out(s);   // Hello, world!
+
+// float coercion
+f = 1.5;
+f += 1;
+out(f);   // 2.5
+
+// array element compound assign
+a = [1, 2, 3];
+a[0] += 100;
+a[1] *= 10;
+out(a[0]);  // 101
+out(a[1]);  // 20
+
+// map element compound assign
+m = map();
+m["count"] = 1;
+m["count"] += 1;
+m["count"] += 1;
+out(m["count"]);  // 3
+
+// compound assign in a for-loop increment
+total = 0;
+for (i = 0; i < 5; i += 1) {
+    total += i;
+};
+out(total);  // 0+1+2+3+4 = 10

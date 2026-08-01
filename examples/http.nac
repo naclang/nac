@@ -1,0 +1,24 @@
+// Example: HTTP Requests in NaC Language
+// ------------------------------------------
+
+out("\n=== HTTP GET ORNEGI ===");
+out(httpGet("https://api.ipify.org/?format=json"));
+
+out("\n=== HTTP POST ORNEGI ===");
+postBody = map();
+postBody["mesaj"] = "Merhaba";
+postBody["dil"] = "NaC";
+out(httpPost("https://httpbin.org/post", postBody));
+
+out("\n=== HTTP PUT ORNEGI ===");
+putBody = map();
+putBody["guncelleme"] = "Bu bir PUT istegi";
+putBody["dil"] = "NaC";
+out(httpPut("https://httpbin.org/put", putBody));
+
+out("\n=== HTTP DELETE ORNEGI ===");
+out(httpDelete("https://httpbin.org/delete"));
+
+out("\n=== HTTP JSON kisayolu (parse edilmis sonuc donuyor) ===");
+result = httpJson("GET", "https://api.ipify.org/?format=json");
+out(result["ip"]);

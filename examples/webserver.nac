@@ -1,0 +1,57 @@
+// examples/webserver.nac
+// A tiny JSON API backend written in NaC.
+//
+// Run:   nac examples/webserver.nac
+// Test:  curl http://localhost:8080/
+//        curl "http://localhost:8080/hello?name=Ayse"
+//        curl -X POST -d '{"a":1,"b":2}' http://localhost:8080/api/echo
+
+users = [];
+push(users, "Ada");
+push(users, "Turing");
+push(users, "Grace");
+
+fn handler(method, path, query, headers, body) {
+    out(method + " " + path);
+
+    if (path == "/") {
+        rn "NaC web sunucusuna hos geldiniz!";
+    };
+
+    if (path == "/hello") {
+        name = "Dunya";
+        if (has(query, "name")) {
+            name = query["name"];
+        };
+        rn "Merhaba, " + name + "!";
+    };
+
+    if (path == "/users") {
+        resp = map();
+        resp["status"] = 200;
+        resp["body"] = users;
+        rn resp;
+    };
+
+    if (path == "/api/echo") {
+        if (method != "POST") {
+            resp = map();
+            resp["status"] = 405;
+            resp["body"] = "Bu uc nokta yalnizca POST kabul eder.";
+            rn resp;
+        };
+
+        data = jsonParse(body);
+        resp = map();
+        resp["status"] = 200;
+        resp["body"] = data;
+        rn resp;
+    };
+
+    notFound = map();
+    notFound["status"] = 404;
+    notFound["body"] = "Bulunamadi: " + path;
+    rn notFound;
+};
+
+serve(8080, "handler");

@@ -1,0 +1,16 @@
+// Example: Find Maximum Number
+// ---------------------------------------------------
+
+fn find_max(arr, size) {
+    max_value = arr[0];
+    for(i = 1; i < size; i++) {
+        if(arr[i] > max_value) {
+            max_value = arr[i];
+        };
+    };
+    rn max_value;
+};
+
+test_numbers = [23, 45, 5, 12, 78, 34, 90, 56];
+maximum = find_max(test_numbers, 7);
+out("The largest number: " + maximum);
