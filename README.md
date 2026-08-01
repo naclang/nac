@@ -90,7 +90,7 @@ skip.)
 
 - Maximum functions: 100
 - Maximum function parameters: 10
-- Maximum call stack depth: 100 (as of v1.0.0 this is a real, safely-reachable limit on both Unix and Windows builds — see `CHANGELOG.md` for a fix that closed a silent-crash issue on deep recursion)
+- Maximum call stack depth: 100 (as of v1.0.0 this is a real, safely-reachable limit on both Unix and Windows builds
 - Maximum array size: 10,000 elements
 - Strings limited to 8192 characters (this bounds HTTP request/response bodies too)
 - `serve()` handles connections concurrently (one thread per connection, capped at 64 in flight), but each handler _call_ is still serialized behind an internal lock since the interpreter's variables/call-stack are shared state — fine for typical route logic, but a handler that blocks for a long time (e.g. `sleep()`) will make other requests wait too
