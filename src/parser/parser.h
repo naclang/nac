@@ -3,7 +3,7 @@
 
 #include "ast.h"
 
-#define MAX_FUNCS 100
+#define MAX_FUNCS 256
 #define MAX_PARAMS 10
 
 typedef struct {

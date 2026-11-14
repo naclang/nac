@@ -8,7 +8,7 @@
 #include "../runtime/value.h"
 #include "../runtime/vartable.h"
 
-#define NAC_VERSION "1.0.0"
+#define NAC_VERSION "1.1.0"
 #define NAC_TAG "NaC" NAC_VERSION
 #define MAX_CALL_DEPTH 100
 
@@ -31,6 +31,14 @@ extern Value return_value;
 
 extern bool error_occurred;
 extern int error_count;
+
+/* try/catch support. While try_depth > 0, report_error() does not print or
+ * count: it stores the first message in caught_error and sets error_pending,
+ * which makes every running block stop at the next statement until the
+ * enclosing `try` takes the error and runs its `catch`. */
+extern int try_depth;
+extern bool error_pending;
+extern char caught_error[512];
 
 extern char latest[64];
 

@@ -38,6 +38,9 @@ void value_to_display_string(Value v, char *out, size_t out_size) {
         case TYPE_MAP:
             snprintf(out, out_size, "[map:%d]", v.map_val.size);
             break;
+        case TYPE_FUNC:
+            snprintf(out, out_size, "<fn>");
+            break;
         default:
             if (out_size > 0) out[0] = '\0';
             break;
@@ -53,7 +56,8 @@ bool is_builtin_function(const char *name) {
         "read", "write", "append", "map",
         "typeOf", "toInt", "toFloat", "toString", "isNull",
         "urlEncode", "urlDecode",
-        "now", "sleep"
+        "now", "array", "range", "keys", "values", "sleep",
+        "input", "len", "str", "int", "float", "type"
     };
     int builtin_count = sizeof(builtins) / sizeof(builtins[0]);
     for (int i = 0; i < builtin_count; i++) {
@@ -64,7 +68,42 @@ bool is_builtin_function(const char *name) {
     return false;
 }
 
+/* Python-style short names for the camelCase builtins. */
+static const char *canonical_builtin(const char *name) {
+    if (strcmp(name, "len") == 0) return "length";
+    if (strcmp(name, "str") == 0) return "toString";
+    if (strcmp(name, "int") == 0) return "toInt";
+    if (strcmp(name, "float") == 0) return "toFloat";
+    if (strcmp(name, "type") == 0) return "typeOf";
+    return name;
+}
+
 Value call_builtin_function(const char *name, Value *args, int arg_count) {
+    name = canonical_builtin(name);
+
+    if (strcmp(name, "input") == 0) {
+        /* input() / input("prompt") -> next line from stdin as a string, null at EOF */
+        if (arg_count > 1) {
+            report_error("input() takes at most 1 argument (prompt)");
+            return make_null();
+        }
+        if (arg_count == 1) {
+            char prompt[1024];
+            value_to_display_string(args[0], prompt, sizeof(prompt));
+            fputs(prompt, stdout);
+            fflush(stdout);
+        }
+        char *line = (char*)malloc(MAX_STRING_LEN);
+        if (!line) return make_null();
+        if (!fgets(line, MAX_STRING_LEN, stdin)) {
+            free(line);
+            return make_null();
+        }
+        line[strcspn(line, "\r\n")] = '\0';
+        Value result = make_string(line);
+        free(line);
+        return result;
+    }
     if (strcmp(name, "sqrt") == 0) {
         if (arg_count != 1) {
             report_error("sqrt() requires 1 argument");
@@ -523,6 +562,7 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             case TYPE_MAP: return make_string("map");
             case TYPE_BOOL: return make_string("bool");
             case TYPE_NULL: return make_string("null");
+            case TYPE_FUNC: return make_string("function");
         }
         return make_string("unknown");
     }
@@ -605,6 +645,51 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             return make_int(0);
         }
         return make_int((int)time(NULL));
+    }
+
+    if (strcmp(name, "range") == 0) {
+        /* range(n) -> [0..n-1]   range(a, b) -> [a..b-1] */
+        if (arg_count != 1 && arg_count != 2) {
+            report_error("range() requires 1 or 2 arguments");
+            return make_array(0);
+        }
+        int from = (arg_count == 2) ? to_int(args[0]) : 0;
+        int to = (arg_count == 2) ? to_int(args[1]) : to_int(args[0]);
+        int n = to > from ? to - from : 0;
+        if (n > MAX_ARRAY_SIZE) {
+            report_error("range() too large");
+            return make_array(0);
+        }
+        Value arr = make_array(n);
+        for (int i = 0; i < n; i++) arr.array_val.elements[i] = make_int(from + i);
+        return arr;
+    }
+
+    if (strcmp(name, "keys") == 0 || strcmp(name, "values") == 0) {
+        if (arg_count != 1 || args[0].type != TYPE_MAP) {
+            report_error("keys()/values() require 1 map argument");
+            return make_array(0);
+        }
+        int n = args[0].map_val.size;
+        Value arr = make_array(n);
+        for (int i = 0; i < n; i++) {
+            arr.array_val.elements[i] = (name[0] == 'k') ? make_string(args[0].map_val.keys[i])
+                                                          : copy_value(args[0].map_val.values[i]);
+        }
+        return arr;
+    }
+
+    if (strcmp(name, "array") == 0) {
+        if (arg_count != 1) {
+            report_error("array() requires 1 argument (size)");
+            return make_array(0);
+        }
+        int n = to_int(args[0]);
+        if (n < 0 || n > MAX_ARRAY_SIZE) {
+            report_error("array() size out of range");
+            return make_array(0);
+        }
+        return make_array(n);
     }
 
     if (strcmp(name, "sleep") == 0) {

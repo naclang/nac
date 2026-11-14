@@ -46,20 +46,25 @@ typedef enum {
     TOK_RN,
     TOK_IN,
     TOK_OUT,
-    TOK_TIME,
     TOK_BREAK,
     TOK_CONTINUE,
-    TOK_ARRAY,
     TOK_WHILE,
-    TOK_HTTP,
+    TOK_ELSE,
+    TOK_ELIF,
+    TOK_DOT,
+    TOK_ROUTE,
     TOK_BOOL,
-    TOK_NULL
+    TOK_NULL,
+    TOK_TRY,
+    TOK_CATCH,
+    TOK_THROW
 } NaCTokenType;
 
 typedef struct {
     NaCTokenType type;
     int line;
     int col;
+    int nl_before; /* 1 if a newline separates this token from the previous one */
     union {
         int int_val;
         double float_val;

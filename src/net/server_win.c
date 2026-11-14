@@ -41,6 +41,7 @@ static void ensure_locks_initialized(void) {
 
 typedef struct {
     SOCKET client_fd;
+    char client_ip[64];
     char handler_name[MAX_HANDLER_NAME_LEN];
 } ConnArgs;
 
@@ -51,25 +52,106 @@ static void release_connection_slot(void) {
     LeaveCriticalSection(&g_conn_count_lock);
 }
 
+static void lock_exec(void) { EnterCriticalSection(&g_nac_exec_lock); }
+static void unlock_exec(void) { LeaveCriticalSection(&g_nac_exec_lock); }
+
+static long long now_ms(void) {
+    return (long long)GetTickCount64();
+}
+
+/* recv() with a total-request deadline. Returns the byte count, 0 on
+ * orderly close, -1 on error, -2 on timeout. */
+static int recv_deadline(SOCKET fd, char *buf, int len, long long deadline) {
+    for (;;) {
+        long long remain = deadline - now_ms();
+        if (remain <= 0) return -2;
+
+        struct timeval tv;
+        tv.tv_sec = (long)(remain / 1000);
+        tv.tv_usec = (long)((remain % 1000) * 1000);
+
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+
+        int ready = select(0, &rfds, NULL, NULL, &tv);
+        if (ready == SOCKET_ERROR) {
+            if (WSAGetLastError() == WSAEINTR) continue;
+            return -1;
+        }
+        if (ready == 0) return -2;
+
+        int n = recv(fd, buf, len, 0);
+        if (n == SOCKET_ERROR && WSAGetLastError() == WSAEINTR) continue;
+        return n;
+    }
+}
+
+static int send_all(SOCKET fd, const char *buf, int len) {
+    int sent_total = 0;
+    while (sent_total < len) {
+        int sent = send(fd, buf + sent_total, len - sent_total, 0);
+        if (sent == SOCKET_ERROR) {
+            if (WSAGetLastError() == WSAEINTR) continue;
+            return 0;
+        }
+        if (sent == 0) return 0;
+        sent_total += sent;
+    }
+    return 1;
+}
+
+static void send_http_error(SOCKET fd, int status, const char *message) {
+    char out[1024];
+    int n = nac_http_build_error_response(status, message, out, sizeof(out));
+    if (n > 0) send_all(fd, out, n);
+}
+
 static DWORD WINAPI handle_connection(LPVOID arg) {
     ConnArgs *ca = (ConnArgs*)arg;
     SOCKET client_fd = ca->client_fd;
     char handler_name[MAX_HANDLER_NAME_LEN];
+    char client_ip[64];
     strncpy(handler_name, ca->handler_name, sizeof(handler_name) - 1);
     handler_name[sizeof(handler_name) - 1] = '\0';
+    strncpy(client_ip, ca->client_ip, sizeof(client_ip) - 1);
+    client_ip[sizeof(client_ip) - 1] = '\0';
     free(ca);
 
     char *raw = (char*)malloc(REQ_BUFFER_SIZE);
     char *resp = (char*)malloc(RESP_BUFFER_SIZE);
+    if (!raw || !resp) {
+        free(raw);
+        free(resp);
+        closesocket(client_fd);
+        release_connection_slot();
+        return 0;
+    }
 
+    DWORD timeout = NAC_READ_TIMEOUT_MS;
+    setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+
+    long long deadline = now_ms() + NAC_READ_TIMEOUT_MS;
     size_t total = 0;
     int header_end = -1;
+    int early_status = 0;
 
-    while (total < REQ_BUFFER_SIZE - 1) {
-        int n = recv(client_fd, raw + total, (int)(REQ_BUFFER_SIZE - 1 - total), 0);
-        if (n <= 0) break;
+    while (total < NAC_MAX_HEADER_BYTES) {
+        int n = recv_deadline(client_fd, raw + total,
+                              (int)(REQ_BUFFER_SIZE - 1 - total), deadline);
+        if (n == -2) {
+            early_status = 408;
+            break;
+        }
+        if (n <= 0) {
+            early_status = 400;
+            break;
+        }
+
         total += (size_t)n;
         raw[total] = '\0';
+
         char *found = strstr(raw, "\r\n\r\n");
         if (found) {
             header_end = (int)(found - raw) + 4;
@@ -77,7 +159,12 @@ static DWORD WINAPI handle_connection(LPVOID arg) {
         }
     }
 
-    if (header_end < 0) {
+    if (header_end < 0 || header_end > NAC_MAX_HEADER_BYTES) {
+        int status = early_status ? early_status : 431;
+        send_http_error(client_fd, status,
+                        status == 408 ? "408 Request Timeout"
+                                      : status == 431 ? "431 Request Header Fields Too Large"
+                                                      : "400 Bad Request");
         closesocket(client_fd);
         free(raw);
         free(resp);
@@ -87,56 +174,100 @@ static DWORD WINAPI handle_connection(LPVOID arg) {
 
     NacHttpRequest req;
     nac_http_parse_request(raw, header_end, &req);
+    strncpy(req.client_ip, client_ip, sizeof(req.client_ip) - 1);
+    req.client_ip[sizeof(req.client_ip) - 1] = '\0';
+
+    if (req.method[0] == '\0' || req.path[0] != '/') {
+        send_http_error(client_fd, 400, "400 Bad Request");
+        nac_http_free_request(&req);
+        closesocket(client_fd);
+        free(raw);
+        free(resp);
+        release_connection_slot();
+        return 0;
+    }
+
+    if (req.content_length < 0) {
+        send_http_error(client_fd, 400, "400 Bad Request: invalid Content-Length");
+        nac_http_free_request(&req);
+        closesocket(client_fd);
+        free(raw);
+        free(resp);
+        release_connection_slot();
+        return 0;
+    }
+    if (req.content_length > NAC_MAX_BODY_BYTES) {
+        send_http_error(client_fd, 413,
+                        "413 Payload Too Large (request body limit is 8191 bytes)");
+        nac_http_free_request(&req);
+        closesocket(client_fd);
+        free(raw);
+        free(resp);
+        release_connection_slot();
+        return 0;
+    }
 
     int want = req.content_length;
-    int max_body = REQ_BUFFER_SIZE - header_end - 1;
-    if (want > max_body) want = max_body;
-
+    int body_error = 0;
     while ((int)(total - header_end) < want) {
-        int n = recv(client_fd, raw + total, (int)(REQ_BUFFER_SIZE - 1 - total), 0);
-        if (n <= 0) break;
+        int n = recv_deadline(client_fd, raw + total,
+                              (int)(REQ_BUFFER_SIZE - 1 - total), deadline);
+        if (n == -2) {
+            body_error = 408;
+            break;
+        }
+        if (n <= 0) {
+            body_error = 400;
+            break;
+        }
         total += (size_t)n;
         raw[total] = '\0';
     }
 
+    if (body_error) {
+        send_http_error(client_fd, body_error,
+                        body_error == 408 ? "408 Request Timeout" : "400 Bad Request");
+        nac_http_free_request(&req);
+        closesocket(client_fd);
+        free(raw);
+        free(resp);
+        release_connection_slot();
+        return 0;
+    }
+
     int body_available = (int)total - header_end;
+    if (body_available > want) body_available = want;
     if (body_available > 0) {
         int copy_len = body_available;
         if (copy_len >= MAX_STRING_LEN) copy_len = MAX_STRING_LEN - 1;
-        memcpy(req.body, raw + header_end, copy_len);
+        memcpy(req.body, raw + header_end, (size_t)copy_len);
         req.body[copy_len] = '\0';
     }
 
-    Value args[5];
-    args[0] = make_string(req.method);
-    args[1] = make_string(req.path);
-    args[2] = req.query;
-    args[3] = req.headers;
-    args[4] = make_string(req.body);
-
     Value result;
-    EnterCriticalSection(&g_nac_exec_lock);
-    int found = call_nac_function(handler_name, args, 5, &result);
-    LeaveCriticalSection(&g_nac_exec_lock);
-
+    char *raw_resp = NULL;
+    int raw_len = 0;
     int status = 0;
-    int resp_len = nac_http_build_response(found, handler_name, result, resp, RESP_BUFFER_SIZE, &status);
+    int is_raw = nac_dispatch_request(&req, handler_name, lock_exec, unlock_exec,
+                                      &result, &raw_resp, &raw_len, &status);
 
-    if (resp_len > 0) {
-        int sent_total = 0;
-        while (sent_total < resp_len) {
-            int sent = send(client_fd, resp + sent_total, resp_len - sent_total, 0);
-            if (sent <= 0) break;
-            sent_total += sent;
+    if (is_raw) {
+        send_all(client_fd, raw_resp, raw_len);
+        free(raw_resp);
+    } else {
+        int resp_len = nac_http_build_response(1, handler_name, result, resp,
+                                               RESP_BUFFER_SIZE, &status);
+        if (resp_len > 0) {
+            send_all(client_fd, resp, resp_len);
+        } else {
+            send_http_error(client_fd, 500, "500 Internal Server Error");
         }
+        free_value(&result);
     }
 
     printf("%s %s -> %d\n", req.method, req.path, status);
     fflush(stdout);
 
-    if (found) {
-        free_value(&result);
-    }
     nac_http_free_request(&req);
     closesocket(client_fd);
     free(raw);
@@ -185,7 +316,11 @@ int server_start(int port, const char *handler_name) {
         return 1;
     }
 
-    printf("NaC HTTP server listening on http://localhost:%d (handler: %s)\n", port, handler_name);
+    if (handler_name && handler_name[0]) {
+        printf("NaC HTTP server listening on http://localhost:%d (handler: %s)\n", port, handler_name);
+    } else {
+        printf("NaC HTTP server listening on http://localhost:%d\n", port);
+    }
     fflush(stdout);
 
     for (;;) {
@@ -202,8 +337,19 @@ int server_start(int port, const char *handler_name) {
         LeaveCriticalSection(&g_conn_count_lock);
 
         ConnArgs *ca = (ConnArgs*)malloc(sizeof(ConnArgs));
+        if (!ca) {
+            closesocket(client_fd);
+            release_connection_slot();
+            continue;
+        }
         ca->client_fd = client_fd;
-        strncpy(ca->handler_name, handler_name, sizeof(ca->handler_name) - 1);
+        ca->client_ip[0] = '\0';
+        char *ip = inet_ntoa(client_addr.sin_addr);
+        if (ip) {
+            strncpy(ca->client_ip, ip, sizeof(ca->client_ip) - 1);
+            ca->client_ip[sizeof(ca->client_ip) - 1] = '\0';
+        }
+        strncpy(ca->handler_name, handler_name ? handler_name : "", sizeof(ca->handler_name) - 1);
         ca->handler_name[sizeof(ca->handler_name) - 1] = '\0';
 
         HANDLE thread = CreateThread(NULL, 0, handle_connection, ca, 0, NULL);

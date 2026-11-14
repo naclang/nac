@@ -1,0 +1,13 @@
+// Example: Recursive Fibonacci
+// ---------------------------------------------------
+
+n = 0
+fn fib_recursive(n) {
+    if(n <= 1) {
+        return n
+    }
+    return fib_recursive(n - 1) + fib_recursive(n - 2)
+}
+
+print("Fibonacci(10) recursive:")
+print(fib_recursive(10))

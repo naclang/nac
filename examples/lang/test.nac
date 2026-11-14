@@ -1,0 +1,80 @@
+// Example: NaC Stage 1 Test Suite
+// ---------------------------------------------------
+
+print("=================================================")
+print("       NaC Language Stage 1 Test Suite")
+print("=================================================")
+print("")
+
+// ============ MATH FUNCTIONS ============
+print("1. MATH FUNCTIONS")
+print("  sqrt(16) = " + sqrt(16))
+print("  pow(2, 10) = " + pow(2, 10))
+print("  sin(0) = " + sin(0))
+print("  cos(0) = " + cos(0))
+print("  abs(-42) = " + abs(-42))
+print("  floor(3.7) = " + floor(3.7))
+print("  ceil(3.2) = " + ceil(3.2))
+print("  round(3.5) = " + round(3.5))
+print("")
+
+// ============ STRING FUNCTIONS ============
+print("2. STRING FUNCTIONS")
+print("  length(\"hello\") = " + length("hello"))
+print("  upper(\"hello\") = " + upper("hello"))
+print("  lower(\"HELLO\") = " + lower("HELLO"))
+print("  trim(\"  spaces  \") = \"" + trim("  spaces  ") + "\"")
+print("  substr(\"abcdefg\", 2, 3) = " + substr("abcdefg", 2, 3))
+print("  indexOf(\"hello world\", \"world\") = " + indexOf("hello world", "world"))
+text = "foo bar foo"
+print("  replace(\"foo bar foo\", \"foo\", \"baz\") = " + replace(text, "foo", "baz"))
+print("")
+
+// ============ ARRAY FUNCTIONS ============
+print("3. ARRAY FUNCTIONS")
+arr = [5, 3, 8, 1, 9]
+print("  Array: [5, 3, 8, 1, 9]")
+print("  length(arr) = " + length(arr))
+print("  first(arr) = " + first(arr))
+print("  last(arr) = " + last(arr))
+rev = reverse(arr)
+print("  reverse(arr) = " + join(rev, ", "))
+slice_arr = slice(arr, 1, 4)
+print("  slice(arr, 1, 4) = " + join(slice_arr, ", "))
+nums = [10, 20, 30]
+print("  join([10, 20, 30], \" + \") = " + join(nums, " + "))
+print("")
+
+// ============ FILE I/O FUNCTIONS ============
+print("4. FILE I/O FUNCTIONS")
+bytes = write("stage1_test.txt", "NaC Stage 1 Test")
+print("  wrote to stage1_test.txt")
+content = read("stage1_test.txt")
+print("  read file contents")
+append_bytes = append("stage1_test.txt", " updated")
+print("  appended to stage1_test.txt")
+updated = read("stage1_test.txt")
+print("  updated content saved")
+print("")
+
+// ============ USER-DEFINED FUNCTIONS (Already Working) ============
+print("5. USER-DEFINED FUNCTIONS")
+fn add(a, b) {
+    return a + b
+}
+
+fn factorial(n) {
+    if(n <= 1) {
+        return 1
+    } else {
+        return n * factorial(n - 1)
+    }
+}
+
+print("  add(5, 3) = " + add(5, 3))
+print("  factorial(5) = " + factorial(5))
+print("")
+
+print("=================================================")
+print("        All Stage 1 Tests Completed!")
+print("=================================================")

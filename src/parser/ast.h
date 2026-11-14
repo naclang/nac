@@ -8,27 +8,30 @@ typedef enum {
     AST_FLOAT_LITERAL,
     AST_STRING_LITERAL,
     AST_VARIABLE,
-    AST_ARRAY_ACCESS,
     AST_BINARY_OP,
     AST_UNARY_OP,
     AST_ASSIGN,
-    AST_ARRAY_ASSIGN,
     AST_CALL,
     AST_BLOCK,
     AST_IF,
-    AST_FOR,
     AST_RETURN,
     AST_BREAK,
     AST_CONTINUE,
     AST_OUT,
-    AST_IN,
     AST_INCREMENT,
     AST_DECREMENT,
     AST_ARRAY_LITERAL,
     AST_WHILE,
-    AST_HTTP,
     AST_BOOL_LITERAL,
-    AST_NULL_LITERAL
+    AST_NULL_LITERAL,
+    AST_INDEX,
+    AST_INDEX_ASSIGN,
+    AST_MAP_LITERAL,
+    AST_FOREACH,
+    AST_FUNC_LITERAL,   /* fn(params) { ... } used as a value; var_name = internal function name */
+    AST_HTTP_CALL,      /* http.get { ... }, http.post { ... }, ... */
+    AST_TRY,            /* try { ... } catch e { ... } */
+    AST_THROW           /* throw value */
 } ASTNodeType;
 
 typedef struct ASTNode {
@@ -53,16 +56,6 @@ typedef struct ASTNode {
             NaCTokenType compound_op; /* TOK_EOF = plain '=', else +=/-=/*=// desugars to var OP value */
         } assign;
         struct {
-            char var_name[MAX_TOKEN_LEN];
-            struct ASTNode *index;
-            struct ASTNode *value;
-            NaCTokenType compound_op; /* TOK_EOF = plain '=', else +=/-=/*=// desugars to arr[idx] OP value */
-        } array_assign;
-        struct {
-            char var_name[MAX_TOKEN_LEN];
-            struct ASTNode *index;
-        } array_access;
-        struct {
             char func_name[MAX_TOKEN_LEN];
             struct ASTNode **args;
             int arg_count;
@@ -77,20 +70,11 @@ typedef struct ASTNode {
             struct ASTNode *else_block;
         } if_stmt;
         struct {
-            struct ASTNode *init;
-            struct ASTNode *condition;
-            struct ASTNode *increment;
-            struct ASTNode *body;
-        } for_stmt;
-        struct {
             struct ASTNode *value;
         } return_stmt;
         struct {
             struct ASTNode *value;
         } out_stmt;
-        struct {
-            char var_name[MAX_TOKEN_LEN];
-        } in_stmt;
         struct {
             char var_name[MAX_TOKEN_LEN];
         } inc_dec;
@@ -103,10 +87,36 @@ typedef struct ASTNode {
             struct ASTNode *body;
         } while_stmt;
         struct {
-            struct ASTNode *method;
-            struct ASTNode *url;
+            struct ASTNode *object;
+            struct ASTNode *index;
+        } index;
+        struct {
+            struct ASTNode *target; /* an AST_INDEX node */
+            struct ASTNode *value;
+            NaCTokenType compound_op;
+        } index_assign;
+        struct {
+            struct ASTNode **keys;
+            struct ASTNode **values;
+            int count;
+        } map_literal;
+        struct {
+            struct ASTNode *try_block;
+            char var_name[MAX_TOKEN_LEN];   /* catch variable, "" if none */
+            struct ASTNode *catch_block;
+        } try_stmt;
+        struct {
+            struct ASTNode *value;
+        } throw_stmt;
+        struct {
+            char method[16];          /* "GET", "POST", ... */
+            struct ASTNode *data;     /* the { ... } options map literal */
+        } http_call;
+        struct {
+            char var_name[MAX_TOKEN_LEN];
+            struct ASTNode *iterable;
             struct ASTNode *body;
-        } http_stmt;
+        } foreach_stmt;
     };
 } ASTNode;
 

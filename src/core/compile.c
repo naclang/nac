@@ -280,9 +280,14 @@ int cmd_build(int argc, char **argv) {
     }
 #ifdef _WIN32
     n += snprintf(cmd + n, sizeof(cmd) - n,
-                  " -o \"%s\" -lwinhttp -lws2_32 -lm -Wl,--stack,134217728", output_name);
+                  " -o \"%s\" -lwinhttp -lws2_32 -lbcrypt -lm -Wl,--stack,134217728", output_name);
 #else
-    n += snprintf(cmd + n, sizeof(cmd) - n, " -o \"%s\" -lcurl -lm -lpthread", output_name);
+    /* Prefer pkg-config so keg-only OpenSSL installs (Homebrew on macOS) are
+     * found; fall back to the default -lcrypto search path. */
+    n += snprintf(cmd + n, sizeof(cmd) - n,
+                  " -o \"%s\" -lcurl $(pkg-config --cflags --libs libcrypto 2>/dev/null"
+                  " || pkg-config --cflags --libs openssl 2>/dev/null || echo -lcrypto)"
+                  " -lm -lpthread", output_name);
 #endif
 
     printf("[INFO] Building standalone executable from %s ...\n", script_path);

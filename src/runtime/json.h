@@ -6,6 +6,9 @@
 #include "value.h"
 
 bool json_parse_value(const char *json, Value *out);
+
+/* Silent variant: no error report on invalid JSON. */
+bool json_try_parse_value(const char *json, Value *out);
 char *json_stringify_value(Value value);
 
 #endif

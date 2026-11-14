@@ -1,0 +1,24 @@
+// examples/web/04_api_gateway.nac -- baska bir API'yi cagiran route (internet gerekir)
+//
+// Calistir:  ./nac examples/web/04_api_gateway.nac
+// Dene:      curl http://localhost:8080/ip
+//
+// Dis servis cevap vermezse sunucu cokmez: 502 doner.
+
+fn logUpstream(r) {
+    print("upstream:", r.status, r.error or "")
+}
+
+route GET "/ip" {
+    res = http.get {
+        url: "https://api.ipify.org/?format=json",
+        timeout: 5,
+        callback: logUpstream
+    }
+    if not res.ok {
+        return json({ error: "upstream basarisiz", detail: res.error }, 502)
+    }
+    return json({ sunucunun_ip_adresi: res.data.ip })
+}
+
+serve(8080)

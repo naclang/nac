@@ -12,7 +12,8 @@ typedef enum {
     TYPE_ARRAY,
     TYPE_MAP,
     TYPE_BOOL,
-    TYPE_NULL
+    TYPE_NULL,
+    TYPE_FUNC      /* first-class function; str_val holds the function's internal name */
 } ValueType;
 
 typedef struct Value {
@@ -42,6 +43,7 @@ Value make_array(int size);
 Value make_map(void);
 Value make_bool(int v);
 Value make_null(void);
+Value make_func(const char *name);
 
 double to_float(Value v);
 int to_int(Value v);

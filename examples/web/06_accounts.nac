@@ -1,0 +1,217 @@
+// examples/web/06_accounts.nac -- kayit, giris, cikis, oturum ve rol kontrolu
+//
+// Calistir:  ./nac examples/web/06_accounts.nac
+// Dene:
+//   curl -i -X POST http://localhost:8080/register \
+//        -d '{"username":"ada","password":"correct horse"}'
+//   curl -i -c cookies.txt -X POST http://localhost:8080/login \
+//        -d '{"username":"ada","password":"correct horse"}'
+//   curl -i -b cookies.txt http://localhost:8080/me
+//   curl -i -b cookies.txt http://localhost:8080/admin
+//   curl -i -b cookies.txt -X POST http://localhost:8080/logout
+//
+// Kullanicilar accounts_users.json dosyasinda tutulur. Parolalar PBKDF2 ile
+// tuzlanip yavaslatilir; oturum kimlikleri sunucu tarafinda rastgele uretilir
+// ve HttpOnly bir cookie ile tasinir.
+
+USERS_FILE = "accounts_users.json"
+SESSION_TTL = 86400          // 1 gun (saniye)
+sessions = {}                // sid -> { username, expires }
+
+fn loadUsers() {
+    text = ""
+    try {
+        text = read(USERS_FILE)
+    } catch e {
+        return []
+    }
+
+    if trim(text) == "" {
+        return []
+    }
+
+    try {
+        users = jsonParse(text)
+        if type(users) == "array" {
+            return users
+        }
+    } catch e {
+        return []
+    }
+
+    return []
+}
+
+fn saveUsers(users) {
+    write(USERS_FILE, jsonStringify(users))
+}
+
+fn findUser(users, username) {
+    for u in users {
+        if u.username == username {
+            return u
+        }
+    }
+    return null
+}
+
+fn publicUser(u) {
+    return { username: u.username, role: u.role }
+}
+
+// Cookie'deki sid'yi sunucu tarafindaki oturum tablosunda arar. Cookie
+// degeri tek basina yetmez: gecerli ve suresi dolmamis bir kayit olmali.
+fn sessionUser(sid) {
+    if isNull(sid) or type(sid) != "string" or sid == "" {
+        return null
+    }
+
+    s = sessions[sid]
+    if isNull(s) {
+        return null
+    }
+
+    if s.expires <= now() {
+        sessions[sid] = null
+        return null
+    }
+
+    return findUser(loadUsers(), s.username)
+}
+
+fn errorJson(message, status) {
+    return json({ error: message }, status)
+}
+
+route GET "/" {
+    return html(`<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>NaC accounts</title></head>
+<body>
+<h1>NaC accounts</h1>
+<p>JSON API: POST /register, POST /login, POST /logout, GET /me,
+GET /account, GET /admin</p>
+</body>
+</html>`)
+}
+
+route POST "/register" {
+    data = null
+    try {
+        data = jsonParse(body)
+    } catch e {
+        return errorJson("invalid JSON", 400)
+    }
+
+    if type(data) != "map" or type(data.username) != "string" or type(data.password) != "string" {
+        return errorJson("username and password are required", 400)
+    }
+
+    username = trim(data.username)
+    password = data.password
+
+    if len(username) < 3 or len(username) > 64 {
+        return errorJson("username must be 3-64 characters", 400)
+    }
+    if len(password) < 8 or len(password) > 1024 {
+        return errorJson("password must be 8-1024 characters", 400)
+    }
+
+    users = loadUsers()
+    if not isNull(findUser(users, username)) {
+        return errorJson("username already exists", 409)
+    }
+
+    // Ilk hesap admin olur; sonrakiler normal kullanici. Gercek bir uygulamada
+    // rol atamasini ayri bir yonetici akisina birakin.
+    role = "user"
+    if len(users) == 0 {
+        role = "admin"
+    }
+
+    push(users, {
+        username: username,
+        role: role,
+        password: passwordHash(password)
+    })
+    saveUsers(users)
+
+    return json({ username: username, role: role }, 201)
+}
+
+route POST "/login" {
+    data = null
+    try {
+        data = jsonParse(body)
+    } catch e {
+        return errorJson("invalid JSON", 400)
+    }
+
+    if type(data) != "map" or type(data.username) != "string" or type(data.password) != "string" {
+        return errorJson("username and password are required", 400)
+    }
+
+    u = findUser(loadUsers(), trim(data.username))
+    if isNull(u) or not passwordVerify(data.password, u.password) {
+        return errorJson("invalid username or password", 401)
+    }
+
+    sid = sessionId()
+    sessions[sid] = { username: u.username, expires: now() + SESSION_TTL }
+
+    // Secure: true yalnizca HTTPS arkasinda anlamlidir; yerel HTTP testinde
+    // false. Canlida reverse proxy/TLS kullanip bunu true yapin.
+    setCookie("sid", sid, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "Lax",
+        secure: false,
+        maxAge: SESSION_TTL
+    })
+
+    return json(publicUser(u))
+}
+
+route POST "/logout" {
+    sid = cookie.sid
+    if type(sid) == "string" and sid != "" {
+        sessions[sid] = null
+    }
+
+    clearCookie("sid", { path: "/" })
+    return json({ ok: true })
+}
+
+route GET "/me" {
+    u = sessionUser(cookie.sid)
+    if isNull(u) {
+        return errorJson("authentication required", 401)
+    }
+    return json(publicUser(u))
+}
+
+route GET "/account" {
+    u = sessionUser(cookie.sid)
+    if isNull(u) {
+        return errorJson("authentication required", 401)
+    }
+    return json({ user: publicUser(u), message: "protected route" })
+}
+
+route GET "/admin" {
+    u = sessionUser(cookie.sid)
+    if isNull(u) {
+        return errorJson("authentication required", 401)
+    }
+    if u.role != "admin" {
+        return errorJson("admin role required", 403)
+    }
+
+    list = []
+    for x in loadUsers() {
+        push(list, publicUser(x))
+    }
+    return json({ users: list })
+}
+
+serve(8080)

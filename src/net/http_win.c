@@ -1,5 +1,7 @@
 #include "http.h"
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #ifdef _WIN32
 
@@ -13,195 +15,175 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../util/error.h"
 
-static int parse_url(const char *url, int *is_https, wchar_t *host, int host_cap, wchar_t *path, int path_cap) {
-    *is_https = (strncmp(url, "https://", 8) == 0);
+static void win_set_error(HttpResponse *out, const char *what, DWORD code) {
+    snprintf(out->error, sizeof(out->error), "%s (error %lu)", what, (unsigned long)code);
+}
+
+static int win_has_header(const char **lines, int count, const char *name) {
+    size_t n = strlen(name);
+    for (int i = 0; i < count; i++) {
+        if (_strnicmp(lines[i], name, n) == 0 && lines[i][n] == ':') return 1;
+    }
+    return 0;
+}
+
+int http_perform_win(const char *method, const char *url, const char *body,
+                     const char **header_lines, int header_count,
+                     int timeout_sec, HttpResponse *out) {
+    out->status = 0;
+    out->error[0] = '\0';
+    out->body = NULL;
+
+    int is_https = (strncmp(url, "https://", 8) == 0);
     int is_http = (strncmp(url, "http://", 7) == 0);
-
-    if (!*is_https && !is_http) {
-        report_error("URL must start with http:// or https://");
+    if (!is_https && !is_http) {
+        snprintf(out->error, sizeof(out->error), "URL must start with http:// or https://");
+        out->body = (char*)calloc(1, 1);
         return 0;
     }
 
-    const char *host_start = *is_https ? (url + 8) : (url + 7);
+    const char *host_start = is_https ? (url + 8) : (url + 7);
     const char *path_start = strchr(host_start, '/');
+    int authority_len = path_start ? (int)(path_start - host_start) : (int)strlen(host_start);
 
-    int host_len = path_start ? (int)(path_start - host_start) : (int)strlen(host_start);
-    if (host_len <= 0 || host_len >= host_cap) {
-        report_error("Invalid host in URL");
-        return 0;
+    /* split an optional ":port" off the authority */
+    INTERNET_PORT port = is_https ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
+    int host_len = authority_len;
+    for (int i = authority_len - 1; i >= 0; i--) {
+        if (host_start[i] == ':') {
+            port = (INTERNET_PORT)atoi(host_start + i + 1);
+            host_len = i;
+            break;
+        }
+        if (host_start[i] == ']') break;   /* IPv6 literal without port */
     }
 
-    MultiByteToWideChar(CP_UTF8, 0, host_start, host_len, host, host_cap);
-    host[host_len] = 0;
+    wchar_t host[256];
+    wchar_t path[2048];
+    wchar_t method_w[16];
 
+    if (host_len <= 0 || host_len >= 256) {
+        snprintf(out->error, sizeof(out->error), "invalid host in URL");
+        out->body = (char*)calloc(1, 1);
+        return 0;
+    }
+    MultiByteToWideChar(CP_UTF8, 0, host_start, host_len, host, 256);
+    host[host_len] = 0;
     if (path_start) {
-        MultiByteToWideChar(CP_UTF8, 0, path_start, -1, path, path_cap);
+        MultiByteToWideChar(CP_UTF8, 0, path_start, -1, path, 2048);
     } else {
         wcscpy(path, L"/");
     }
-
-    return 1;
-}
-
-char *http_request_win_response(const char *method, const char *url, const char *body) {
-    int is_https = 0;
-    wchar_t host[256];
-    wchar_t path[1024];
-    wchar_t method_w[16];
-
-    if (!parse_url(url, &is_https, host, 256, path, 1024)) {
-        return NULL;
-    }
-
     MultiByteToWideChar(CP_UTF8, 0, method, -1, method_w, 16);
 
-    HINTERNET session = WinHttpOpen(
-        L"NaC/1.0",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
-        WINHTTP_NO_PROXY_BYPASS,
-        0
-    );
+    /* header block: "Name: value\r\n..." */
+    size_t hdr_cap = 64;
+    for (int i = 0; i < header_count; i++) hdr_cap += strlen(header_lines[i]) + 2;
+    char *hdr_a = (char*)malloc(hdr_cap);
+    hdr_a[0] = '\0';
+    if (body && !win_has_header(header_lines, header_count, "Content-Type")) {
+        strcat(hdr_a, "Content-Type: application/json\r\n");
+    }
+    for (int i = 0; i < header_count; i++) {
+        strcat(hdr_a, header_lines[i]);
+        strcat(hdr_a, "\r\n");
+    }
+    int hdr_wlen = MultiByteToWideChar(CP_UTF8, 0, hdr_a, -1, NULL, 0);
+    wchar_t *hdr_w = (wchar_t*)malloc(sizeof(wchar_t) * (hdr_wlen + 1));
+    MultiByteToWideChar(CP_UTF8, 0, hdr_a, -1, hdr_w, hdr_wlen);
+    hdr_w[hdr_wlen] = 0;
+    free(hdr_a);
 
-    if (!session) {
-        report_error("HTTP: Failed to open session");
-        return NULL;
+    int ok = 0;
+    char *response = NULL;
+    size_t len = 0, cap = 0;
+    HINTERNET session = NULL, connect = NULL, request = NULL;
+
+    session = WinHttpOpen(L"NaC/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!session) { win_set_error(out, "could not open session", GetLastError()); goto done; }
+
+    if (timeout_sec > 0) {
+        int ms = timeout_sec * 1000;
+        WinHttpSetTimeouts(session, ms, ms, ms, ms);
     }
 
-    INTERNET_PORT port = is_https ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
-    HINTERNET connect = WinHttpConnect(session, host, port, 0);
-    if (!connect) {
-        report_error("HTTP: Failed to connect");
-        WinHttpCloseHandle(session);
-        return NULL;
-    }
+    connect = WinHttpConnect(session, host, port, 0);
+    if (!connect) { win_set_error(out, "could not connect", GetLastError()); goto done; }
 
-    DWORD flags = is_https ? WINHTTP_FLAG_SECURE : 0;
-    HINTERNET request = WinHttpOpenRequest(
-        connect,
-        method_w,
-        path,
-        NULL,
-        WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES,
-        flags
-    );
-
-    if (!request) {
-        report_error("HTTP: Failed to open request");
-        WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
-        return NULL;
-    }
+    request = WinHttpOpenRequest(connect, method_w, path, NULL, WINHTTP_NO_REFERER,
+                                 WINHTTP_DEFAULT_ACCEPT_TYPES, is_https ? WINHTTP_FLAG_SECURE : 0);
+    if (!request) { win_set_error(out, "could not open request", GetLastError()); goto done; }
 
     DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
     WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &redirect, sizeof(redirect));
 
-    const wchar_t *headers = body ? L"Content-Type: application/json\r\n" : NULL;
-    BOOL result = WinHttpSendRequest(
-        request,
-        headers,
-        headers ? -1 : 0,
-        (LPVOID)body,
-        body ? (DWORD)strlen(body) : 0,
-        body ? (DWORD)strlen(body) : 0,
-        0
-    );
-
-    if (!result) {
-        report_error("HTTP: Failed to send request");
-        WinHttpCloseHandle(request);
-        WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
-        return NULL;
+    DWORD body_len = body ? (DWORD)strlen(body) : 0;
+    if (!WinHttpSendRequest(request, hdr_wlen > 1 ? hdr_w : WINHTTP_NO_ADDITIONAL_HEADERS,
+                            hdr_wlen > 1 ? (DWORD)-1 : 0,
+                            (LPVOID)body, body_len, body_len, 0)) {
+        win_set_error(out, "request failed", GetLastError());
+        goto done;
     }
-
     if (!WinHttpReceiveResponse(request, NULL)) {
-        report_error("HTTP: Failed to receive response");
-        WinHttpCloseHandle(request);
-        WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
-        return NULL;
+        win_set_error(out, "no response", GetLastError());
+        goto done;
     }
 
-    char *response = NULL;
-    size_t len = 0;
-    size_t cap = 0;
+    DWORD status = 0, status_size = sizeof(status);
+    if (WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                            WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+                            WINHTTP_NO_HEADER_INDEX)) {
+        out->status = (int)status;
+    }
 
-    DWORD size = 0;
-    do {
-        DWORD downloaded = 0;
-        if (!WinHttpQueryDataAvailable(request, &size)) {
-            report_error("HTTP: Failed to query response size");
-            free(response);
-            WinHttpCloseHandle(request);
-            WinHttpCloseHandle(connect);
-            WinHttpCloseHandle(session);
-            return NULL;
+    for (;;) {
+        DWORD avail = 0, got = 0;
+        if (!WinHttpQueryDataAvailable(request, &avail)) {
+            win_set_error(out, "could not read response", GetLastError());
+            out->status = 0;
+            goto done;
         }
-
-        if (!size) {
-            break;
-        }
-
-        if (len + size + 1 > cap) {
-            size_t new_cap = (cap == 0) ? 1024 : cap;
-            while (len + size + 1 > new_cap) {
-                new_cap *= 2;
-            }
+        if (!avail) break;
+        if (len + avail + 1 > cap) {
+            size_t new_cap = cap ? cap : 1024;
+            while (len + avail + 1 > new_cap) new_cap *= 2;
             response = (char*)realloc(response, new_cap);
             cap = new_cap;
         }
-
-        if (!WinHttpReadData(request, response + len, size, &downloaded)) {
-            report_error("HTTP: Failed to read response");
-            free(response);
-            WinHttpCloseHandle(request);
-            WinHttpCloseHandle(connect);
-            WinHttpCloseHandle(session);
-            return NULL;
+        if (!WinHttpReadData(request, response + len, avail, &got)) {
+            win_set_error(out, "could not read response", GetLastError());
+            out->status = 0;
+            goto done;
         }
-
-        len += downloaded;
-    } while (size > 0);
-
-    if (!response) {
-        response = (char*)malloc(1);
-        response[0] = '\0';
-    } else {
-        response[len] = '\0';
+        len += got;
     }
+    ok = 1;
 
-    WinHttpCloseHandle(request);
-    WinHttpCloseHandle(connect);
-    WinHttpCloseHandle(session);
+done:
+    if (request) WinHttpCloseHandle(request);
+    if (connect) WinHttpCloseHandle(connect);
+    if (session) WinHttpCloseHandle(session);
+    free(hdr_w);
 
-    return response;
-}
-
-void http_request_win(const char *method, const char *url, const char *body) {
-    char *response = http_request_win_response(method, url, body);
-    if (response) {
-        printf("%s\n", response);
-        free(response);
-    }
+    if (!response) response = (char*)malloc(1);
+    response[len] = '\0';
+    out->body = response;
+    return ok;
 }
 
 #else
 
-char *http_request_win_response(const char *method, const char *url, const char *body) {
-    (void)method;
-    (void)url;
-    (void)body;
-    return NULL;
-}
-
-void http_request_win(const char *method, const char *url, const char *body) {
-    (void)method;
-    (void)url;
-    (void)body;
+int http_perform_win(const char *method, const char *url, const char *body,
+                     const char **header_lines, int header_count,
+                     int timeout_sec, HttpResponse *out) {
+    (void)method; (void)url; (void)body; (void)header_lines;
+    (void)header_count; (void)timeout_sec;
+    out->status = 0;
+    snprintf(out->error, sizeof(out->error), "not available on this platform");
+    out->body = (char*)calloc(1, 1);
+    return 0;
 }
 
 #endif

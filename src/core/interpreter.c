@@ -28,6 +28,10 @@ Value return_value;
 bool error_occurred = false;
 int error_count = 0;
 
+int try_depth = 0;
+bool error_pending = false;
+char caught_error[512] = "";
+
 int nac_argc = 0;
 char **nac_argv = NULL;
 
@@ -46,6 +50,9 @@ void init_interpreter(void) {
     return_value = make_int(0);
     error_occurred = false;
     error_count = 0;
+    try_depth = 0;
+    error_pending = false;
+    caught_error[0] = '\0';
 }
 
 void set_source_code(char *source) {

@@ -1,0 +1,52 @@
+// examples/web/03_guestbook.nac -- HTML form + dosyada kalici veri
+//
+// Calistir:  ./nac examples/web/03_guestbook.nac
+// Dene:      http://localhost:8080/   (tarayicidan formu doldur)
+
+FILE = "guestbook.txt"
+
+// HTML'e basarken kullanici girdisini temizle
+fn esc(s) {
+    s = replace(s, "&", "&amp;")
+    s = replace(s, "<", "&lt;")
+    return replace(s, ">", "&gt;")
+}
+
+// "name=Ada&msg=Merhaba+d%C3%BCnya" -> { name: "Ada", msg: "Merhaba dünya" }
+fn parseForm(text) {
+    out = {}
+    for pair in split(text, "&") {
+        kv = split(pair, "=")
+        if len(kv) == 2 { out[urlDecode(kv[0])] = urlDecode(kv[1]) }
+    }
+    return out
+}
+
+route GET "/" {
+    items = ""
+    try {
+        for line in split(read(FILE), "\n") {
+            if line != "" { items += `<li>${esc(line)}</li>` }
+        }
+    } catch e {
+        items = "<li><i>Henuz kimse imzalamadi.</i></li>"
+    }
+    return html(`<h1>Ziyaretci defteri</h1>
+<ul>${items}</ul>
+<form method="POST" action="/sign">
+  <input name="name" placeholder="Adin" required>
+  <input name="msg" placeholder="Mesajin" required>
+  <button>Imzala</button>
+</form>`)
+}
+
+route POST "/sign" {
+    form = parseForm(body)
+    if not ("name" in form) or not ("msg" in form) {
+        return html("<p>Ad ve mesaj gerekli.</p>", 400)
+    }
+    append(FILE, form.name + ": " + form.msg + "\n")
+    return redirect("/")
+}
+
+serve(8080)

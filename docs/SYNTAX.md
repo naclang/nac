@@ -1,547 +1,470 @@
-# NaC Language — Full Syntax Reference
+# NaC Language — Syntax Reference
 
-This document lists everything the parser actually supports today — not an
-aspirational spec. Treat it as ground truth for what NaC currently does, so
-you can decide what to simplify or extend next.
-
----
-
-## 1) Comments
+NaC sits between JavaScript and Python: braces for blocks (JavaScript), but
+no semicolons, `and`/`or`/`not`, `for x in list`, `print`, `input`, `elif`
+(Python). This document describes what the parser actually supports.
 
 ```nac
-// a single-line comment (runs to end of line)
+fn greet(name) {
+    return `Hello, ${name}!`
+}
+
+people = ["Ada", "Turing", { name: "Grace" }]
+for p in people {
+    if type(p) == "map" { print(greet(p.name)) } else { print(greet(p)) }
+}
 ```
 
-There is no block comment (`/* ... */`).
-
----
-
-## 2) Data types
-
-| Type   | Example                            |
-| ------ | ---------------------------------- |
-| int    | `42`, `-7`                         |
-| float  | `3.14`, `-0.5`                     |
-| bool   | `true`, `false`                    |
-| null   | `null`                             |
-| string | `"hello"` (escapes: `\n \t \\ \"`) |
-| array  | `[1, 2, 3]` or `array(SIZE)`       |
-| map    | `map()`                            |
-
-Notes:
-
-- Strings are limited to **8192 characters** (`MAX_STRING_LEN`).
-- Arrays are limited to **10,000 elements** (`MAX_ARRAY_SIZE`).
-- `bool` is a real, distinct type (added in v3.5.0) — `typeOf()` reports
-  `"bool"`, `out()` prints `true`/`false`, and JSON round-trips it as a JSON
-  boolean rather than `0`/`1`.
-- `null` is a real, distinct type (added in v1.0.0) — `typeOf()` reports
-  `"null"`, `isNull(x)` checks for it, and JSON's `null` round-trips
-  correctly (previously it silently became the int `0`). `==`/`!=` are
-  null-aware: `null == 0`, `null == ""`, and `null == false` are all
-  `false` — `null` only equals `null`.
-
----
-
-Referencing an undefined variable, or indexing an array out of bounds,
-reports an error to stderr and evaluates to `null` (not `0` — this
-changed in v1.0.0 specifically so a bug like a typo'd variable name
-doesn't get silently masked by a plausible-looking `0`). Execution
-continues after the error, so check your script for a stray error
-message if something looks off.
-
-## 3) Variables
+## 1) Comments and statements
 
 ```nac
-x = 5;              // declaration = assignment (no separate var/let keyword)
-x = x + 1;
-x++;                // only for a plain variable (arr[i]++ is NOT supported)
-x--;
+// single-line comment
+/* block comment,
+   can span lines */
+
+x = 1        // no semicolon needed
+y = 2; z = 3 // ';' is only a separator for several statements on one line
 ```
 
-Variables are dynamically typed — the same name can be reassigned to any
-type at any time.
+A `(` or `[` at the start of a new line is never glued to the previous line.
 
-There's no explicit `local`/`global` keyword. Instead:
+## 2) Keywords
 
-- A **function parameter** always binds as a new local variable, even if
-  a global of the same name exists (so a handler's `path` parameter, for
-  example, can never accidentally alias an unrelated global `path`).
-- A plain **assignment** (`x = ...;`) inside a function updates an
-  existing variable if one is visible by that name (checking the
-  function's own locals first, then the globals), and only creates a
-  brand-new local variable if the name doesn't exist anywhere yet. This
-  is what lets a function mutate shared global state:
+| Group     | Keywords                                       |
+| --------- | ---------------------------------------------- |
+| Functions | `fn`, `return`                                 |
+| Control   | `if`, `elif`, `else`, `for`, `in`, `while`, `break`, `continue` |
+| Logic     | `and`, `or`, `not`                             |
+| Output    | `print`                                        |
+| Errors    | `try`, `catch`, `throw`                        |
+| Web       | `route`                                        |
+| Literals  | `true`, `false`, `null`                        |
+
+Everything else (`input`, `len`, `range`, `serve`, `static`, `html`, `json`, ...)
+is an ordinary builtin function, so it never collides with your variable names.
+
+## 3) Data types
+
+| Type   | Example                          |
+| ------ | -------------------------------- |
+| int    | `42`, `-7`                       |
+| float  | `3.14`                           |
+| bool   | `true`, `false`                  |
+| null   | `null`                           |
+| string | `"hello"` (escapes `\n \t \\ \"`), `` `Hi ${name}` `` |
+| array  | `[1, 2, 3]`, `[]`, `array(5)` (5 zeros) |
+| map    | `{ name: "Ada", "age": 36 }`, `{}`, `map()` |
+| function | `fn(a, b) { return a + b }`, or the bare name of a declared function |
+
+`type(x)` returns `"int" "float" "bool" "null" "string" "array" "map" "function"`.
+Strings are limited to 8192 characters, arrays to 10,000 elements.
+
+### Template strings (interpolation)
+
+Backtick strings embed any expression with `${ }` (like JavaScript). Plain
+`"..."` strings never interpolate, so braces in JSON text are safe.
 
 ```nac
-counter = 0;
+name = "Ada"
+print(`Hello ${name}! ${age + 1} next year, ${user.tags[0]}, ${len(items)} items`)
 
-fn increment() {
-    counter = counter + 1;   // updates the global `counter`, not a shadow
-    rn counter;
-};
-
-out(increment());   // 1
-out(increment());   // 2
-out(counter);        // 2
+html(`<h1>${title}</h1>
+<p>${count > 1 and "many" or "one"}</p>`)   // may span several lines
 ```
 
-(Before v3.6.0 this was a bug — the assignment always created a
-function-local shadow, so the global `counter` was silently never
-updated and the last line above would have printed `0`.)
+Values are rendered like `print` does (`true`, `null`, ...). Escapes inside
+backticks: `\n \t \\ \` \$` (use `\${` for a literal `${`). Templates nest:
+`` `a ${ `<${x}>` } b` ``. Internally a template is just a concatenation, so the
+result is still limited to 8192 characters.
 
----
+## 4) Variables
 
-## 4) Operators (lowest to highest precedence)
-
-```
-Logical     : &&   ||
-Comparison  : ==  !=  <  >  <=  >=      (strcmp for strings, numeric otherwise)
-Additive    : +  -
-Multiplicative: *  /  %
-Unary       : -x   !x
-```
-
-- `+` does automatic string concatenation if either side is a string
-  (e.g. `"a" + 5` → `"a5"`); otherwise it's numeric (int/float) addition.
-- Parentheses can be used to control precedence: `(a + b) * c`.
-- **Comparisons do not chain.** `a < b < c` is a **parse error** (fixed in
-  v3.5.0 — previously it silently parsed as `(a < b) < c`, a meaningless
-  comparison that gave a wrong answer with no warning). Write
-  `(a < b) && (b < c)` instead.
-- No exponent operator (`^`) — use `pow(a, b)`.
-- No bitwise operators (`& | ^ << >>`).
-- No ternary operator (`a ? b : c`).
-
-### Compound assignment (`+= -= *= /=`)
-
-`x OP= y` desugars to `x = x OP y`, reusing the exact same semantics as the
-matching binary operator (so `+=` does string concatenation when either
-side is a string, just like `+`):
+Assignment is declaration — no `let`/`var`:
 
 ```nac
-x = 10;
-x += 5;    // 15
-x -= 3;    // 12
-x *= 2;    // 24
-x /= 4;    // 6
-
-s = "Hello";
-s += ", world!";   // "Hello, world!"
+x = 5
+x += 1          // also -= *= /=
+x++             // x--
 ```
 
-It also works on array elements, map values, and inside a `for` loop's
-increment clause:
+Inside a function, assigning to a name that already exists (local, then
+global) updates it; otherwise a new local is created. Parameters are always
+new locals. Reading an undefined variable, an out-of-range index or a missing
+map key gives `null` (undefined variable and bad index also print an error).
+
+## 5) Operators
+
+```
+or  and          logical, short-circuiting; return an operand (x = a or "default")
+not              negation (also !)   (&& || ! are accepted too)
+== != < > <= >=  comparison (no chaining: write a < b and b < c)
+in  not in       membership: 2 in [1, 2], "k" in map, "ab" in "cab"
++ -              "+" concatenates when either side is a string
+* / %
+-x               unary minus
+```
+
+`pow(a, b)` instead of `**`; there are no bitwise operators or ternary.
+
+## 6) if / elif / else
+
+Parentheses around the condition are optional:
 
 ```nac
-a = [1, 2, 3];
-a[0] += 100;        // a[0] is now 101
-
-m = map();
-m["count"] = 0;
-m["count"] += 1;
-
-for (i = 0; i < 10; i += 2) { out(i); };
+if x < 0 {
+    print("negative")
+} elif x == 0 {
+    print("zero")
+} else {
+    print("positive")
+}
 ```
 
-The target must already exist — `y += 5;` on an undefined `y` is an error
-(same "Undefined variable" behavior as reading `y` anywhere else), it does
-not silently treat the missing variable as `0`.
-
----
-
-## 5) Statement terminators
-
-**Every** statement ends with `;` — including right after the closing `}`
-of an `if` / `for` / `while` / `fn` block:
-
-```nac
-if (x > 0) {
-    out("positive");
-};              // <- required
-
-for (i = 0; i < 10; i++) {
-    out(i);
-};              // <- required
-
-while (x > 0) {
-    x--;
-};              // <- required
-
-fn add(a, b) {
-    rn a + b;
-};              // <- required
-```
-
-Forgetting this `;` is the single most common source of parse errors.
-
----
-
-## 6) if / else if / else
-
-There is no `else` **keyword** — `:` is used instead. As of v3.5.0, `:`
-followed by another condition chains properly (an actual else-if chain,
-not a nested block). As of v3.6.0, the `if` keyword after `:` is
-**optional** — since `(` already makes it unambiguous that a condition
-follows, `} : if (b) { ... }` and `} : (b) { ... }` parse identically:
-
-```nac
-if (x < 0) {
-    out("negative");
-} : (x == 0) {
-    out("zero");
-} : (x < 10) {
-    out("small positive");
-} : {
-    out("large positive");
-};
-```
-
-You can chain as many `: (condition) { ... }` links as you like (the `if`
-is optional on each one, and you can mix and match); the final
-`: { ... }` (no condition) is the plain "else" branch and is optional.
-
----
+(`else if` works too.)
 
 ## 7) Loops
 
 ```nac
-for (i = 0; i < 10; i++) { ... };
-for (i = 0; i < 10; i--) { ... };
-for (i = 0; i < 10; i = i + 2) { ... };
-for (;true;) { ... };          // init/increment are optional, the two ';' are not
+for item in [10, 20, 30] { print(item) }    // arrays
+for key in person { print(key) }            // maps iterate their keys
+for ch in "abc" { print(ch) }               // string characters
+for i in range(5) { }                       // 0..4  (range(a, b) -> a..b-1)
 
-while (condition) { ... };
+while x > 0 { x-- }
 
-break;      // exit the loop
-continue;   // skip to the next iteration
+break
+continue
 ```
 
-The `for` loop's increment clause only accepts `i++`, `i--`, or
-`i = <expression>` for a plain identifier — there's no indexed increment
-like `arr[i]++`.
+## 7a) Errors: try / catch / throw
 
----
+```nac
+try {
+    data = jsonParse(text)          // any runtime error inside the block ...
+    print(data.name)
+} catch e {                         // ... jumps here; `e` is the message (a string)
+    print("bad input:", e)
+}
+```
+
+- `catch e`, `catch (e)` and a bare `catch { }` are all accepted.
+- Catches runtime errors: invalid JSON, division/modulo by zero, array index out
+  of bounds, undefined variables or functions, wrong argument counts, bad
+  `http.<method>` options, stack overflow, ... Syntax errors are found while
+  parsing and are never caught.
+- When an error happens the rest of the `try` block is skipped (a statement that
+  failed does not print, assign or call anything), including in loops and in
+  functions called from the block. Works with `return`, `break` and `continue`
+  inside the block, and `try` blocks can be nested.
+- `throw value` raises your own error; `e` receives the value rendered as text.
+  A `throw` outside any `try` stops the program with `Uncaught: ...`.
+- A failed HTTP request is **not** an error: it comes back as `res.ok == false`
+  with `res.error` set (see section 14).
 
 ## 8) Functions
 
 ```nac
 fn add(a, b) {
-    rn a + b;
-};
-
-result = add(3, 4);
+    return a + b
+}
+print(add(3, 4))
 ```
 
-Rules and limits:
-
-- Up to **100 functions** (`MAX_FUNCS`).
-- Up to **10 parameters** (`MAX_PARAMS`).
-- `rn` = return.
-- Functions cannot be defined inside other functions (no nested `fn`).
-- Functions are called **by name** — you cannot assign a function to a
-  variable and call it through that variable (no first-class functions /
-  callbacks). Where a function needs to be referenced dynamically (e.g.
-  `serve()`), you pass its name as a **string**:
-  `serve(8080, "handler");`
-- Recursion works (see `factorial`, `fibonacci` examples).
-- Max call stack depth: **100** (`MAX_CALL_DEPTH`) — reaching this now
-  reliably produces a normal `"Stack overflow"` error on
-  both Unix and Windows builds. Before that fix, recursive scripts could
-  crash the OS process outright, with no error message at all, well
-  before hitting this limit — as low as depth ~5-10 on Windows, since
-  `Value`'s 8192-byte inline string buffer makes each level of recursion
-  costly in raw C stack. If you see a crash with no NaC error message on
-  an older build, rebuild first (`build.sh` / `build.bat`) before
-  assuming it's a language bug.
-
-### Bare function-call statements
-
-A function call can now be its own statement, without assigning the
-result to anything:
+- Up to 256 functions (routes count) and 10 parameters; call depth 100.
+- A bare `return` returns `null`. Recursion works.
+- Functions are values: `fn(params) { ... }` (no name) is an expression, and the
+  bare name of a declared function evaluates to that function. Store them in
+  variables or maps, or pass them as callbacks:
 
 ```nac
-push(arr, 5);
-serve(8080, "handler");
+add = fn(a, b) { return a + b }
+print(add(2, 3))                      // 5
+
+fn double(x) { return x * 2 }
+op = double                           // no parentheses: the function itself
+print(op(21))                         // 42
 ```
 
-Previously this only worked inside an expression (assignment or `out()`).
-
----
+- Calling through a function value is lenient like JavaScript when a *callback*
+  is invoked by the runtime: missing arguments become `null`, extra ones are
+  dropped. Direct calls `f(x)` still check the argument count.
+- Functions have no closures: a function body sees its own parameters/locals
+  and globals, not the locals of the function that created it.
+- Named `fn name() { }` declarations still can't be nested.
 
 ## 9) Arrays
 
 ```nac
-a = [1, 2, 3];             // literal
-b = array(5);              // 5 elements, all zero
-c = [];                    // empty array (same as array(0))
-
-a[0]                       // read
-a[0] = 10;                 // write (statement form, plain variable only)
-length(a)                  // element count
-push(a, 99);               // append to the end (fixed in v3.4.0 — now actually works)
-pop(a)                      // remove and return the last element
-first(a) / last(a)
-reverse(a)
-slice(a, start, end)
-join(a, ", ")               // array -> string
-split(s, ",")                // string -> array (new)
-contains(s, sub)              // substring search on a STRING (not array membership)
+a = [1, 2, 3]
+a[0]  a[0] = 10  a[1] += 5
+grid = [[1, 2], [3, 4]]
+grid[1][0] = 30                    // nested indexing, read and write
+len(a)  push(a, 99)  pop(a)  first(a)  last(a)
+reverse(a)  slice(a, 1, 3)  join(a, ", ")  split("a,b", ",")
 ```
 
-Limitations:
+No removal at an arbitrary index (only `pop` from the end).
 
-- No multi-level indexing — `arr[i][j]` is not supported (array access
-  only takes a single index; the result of an index can't be indexed
-  again in the same expression).
-- No element removal at an arbitrary index (only `pop()` from the end).
-- No `for each` / `foreach` — use `for (i = 0; i < length(a); i++)`.
-
----
-
-## 10) Maps (dictionaries)
+## 10) Maps
 
 ```nac
-m = map();
-m["name"] = "Ada";
-m["age"] = 30;
+person = { name: "Ada", age: 36, tags: ["math"], address: { city: "London" } }
 
-m["name"]                    // read -- null if the key doesn't exist (v1.0.0+)
-has(m, "name")                 // key exists? (new, returns bool)
-length(m)                      // number of keys
+person.name                 // same as person["name"]
+person.address.city = "Paris"
+person.age += 1
+"name" in person            // or has(person, "name")
+keys(person)  values(person)  len(person)
 ```
 
-Limitations:
-
-- Keys must be `int`, `float`, `string`, or `bool`.
-- No map literal syntax (`{"a": 1}` is not valid — build it with `map()`
-  plus one assignment per key).
-- No key iteration (`for key in map`) — you access keys you already know.
-- No key deletion.
-- Reading a key that doesn't exist returns `null` (no error) — check with
-  `has()` or `isNull()` if you need to tell "missing" apart from a value
-  that's legitimately `null`.
-
----
+Bare identifier keys are strings. Keys must be int, float, string or bool.
+No key deletion yet.
 
 ## 11) Input / output
 
 ```nac
-out(expr);                 // print to stdout + newline
-in(var);                    // read from stdin into var
-in(arr[i]);                  // read from stdin into an array slot
+print("a", 1, true)          // arguments joined by spaces; print() = empty line
+name = input("Name? ")       // reads a line (string); null at end of input
+n = int(input())             // convert explicitly
 
-time()                       // current Unix timestamp (int) — legacy
-now()                        // same thing, new builtin (v3.4.0)
-sleep(ms)                    // sleep for `ms` milliseconds (new)
+now()  sleep(ms)
 ```
 
----
+Concatenating with `+` renders values the way `print` does (`true`, `null`).
 
-## 12) File operations
+## 12) Files
 
 ```nac
-read(path)                     // read file contents as a string
-write(path, contents)           // overwrite the file
-append(path, contents)           // append to the file
+read(path)   write(path, text)   append(path, text)
 ```
 
----
-
-## 13) HTTP
-
-### Client
-
-**Recommended: method-named functions.** The verb is the
-function name instead of a separate string argument, and the body — if
-any — can be a `map()` instead of a hand-escaped JSON string:
+## 13) HTTP server and site hosting
 
 ```nac
-httpGet(url)                    // no body
-httpDelete(url)                 // no body
-httpPost(url, body)             // body optional
-httpPut(url, body)              // body optional
-httpPatch(url, body)            // body optional
+static("public")                       // "/" -> public/index.html, /app.css -> public/app.css
+static("/assets", "public/assets")     // mount a directory under a URL prefix
+
+route GET "/hello/:name" {
+    return html(`<h1>Hello, ${params.name}!</h1>`)
+}
+
+route POST "/api/users" {
+    data = jsonParse(body)
+    return json(data, 201)
+}
+
+serve(8080)                            // blocking
 ```
 
-All five return the response body as a string (pass it to `jsonParse()`,
-or use `httpJson()` below, if you want it parsed). `body` may be a string
-(sent as-is) or any other value such as a `map()`, which is automatically
-JSON-serialized:
+**`route METHOD "pattern" { ... }`** — `METHOD` is `GET`, `POST`, `PUT`,
+`PATCH`, `DELETE`, ... or `*` for any. Inside the body you have `method`,
+`path`, `query`, `headers`, `body`, `params` and `cookie` (see 13a). The
+legacy `serve(port, "handler")` function still receives the original five
+arguments (`method`, `path`, `query`, `headers`, `body`).
+
+- `:name` captures a path segment into `params.name` (URL-decoded); a trailing
+  `*` captures the rest into `params["*"]`. Routes are tried in declaration order.
+- At most 128 routes.
+
+**`static(dir)` / `static(prefix, dir)`** — serves GET/HEAD from a directory;
+directory URLs serve `index.html`; MIME type from the extension; `..` is
+rejected. Files are sent as raw bytes (up to 32 MB each, not limited to 8192
+characters). Up to 8 mounts.
+
+**Resolution order:** routes, then static mounts, then `405` (the path matches
+a route for another method) or `404`.
+
+**Responses.** A route returns a string (200; `text/html` if it starts with
+`<`, else `text/plain`) or a map with `status`, `body` and `headers`, or one of:
 
 ```nac
-out(httpGet("https://example.com"));
-
-payload = map();
-payload["a"] = 1;
-out(httpPost("https://example.com", payload));   // sends {"a":1}, no manual escaping
+html(body)        html(body, status)
+json(value)       json(value, status)       // application/json
+redirect(url)     redirect(url, status)     // 302 by default
 ```
 
-**Lower-level alternatives**, if you need the method as a runtime value
-(e.g. it comes from a variable) rather than picking the function by name:
+Dynamic bodies and header values are limited to 8192 characters; handler
+calls are serialized behind one lock (a slow route delays the others).
+Request size, time and rate limits, plus default security headers, are
+described in 13a.
+
+## 13a) Cookies, sessions and security
+
+Inside a `route`, `cookie` is a map of request cookie names to values, so
+`Cookie: sid=abc; theme=dark` becomes `cookie.sid` and `cookie.theme`.
+Values are kept raw (not URL-decoded); call `urlDecode()` when needed.
+
+Set cookies from inside a route. Each call appends one `Set-Cookie` header to
+the current response (at most 16 per response):
 
 ```nac
-raw = httpRequest("GET", "https://example.com");
-data = httpJson("GET", "https://example.com");   // auto jsonParse
+route POST "/login" {
+    sid = sessionId()                    // 32 random bytes, base64url (43 chars)
+    setCookie("sid", sid, {
+        path: "/",
+        httpOnly: true,                  // default true
+        secure: false,                   // true behind HTTPS
+        sameSite: "Lax",                 // "Lax" (default), "Strict", "None", or false
+        maxAge: 86400                    // seconds; omitted by default
+    })
+    return json({ ok: true })
+}
+
+route POST "/logout" {
+    clearCookie("sid", { path: "/" })
+    return json({ ok: true })
+}
 ```
 
-**Statement form** — the original `http(method, url, body)` keyword also
-still works, but only prints the response; it can't be assigned to a
-variable, so prefer the functions above for anything beyond quick
-one-off debugging:
+Cookie defaults: `path: "/"`, `httpOnly: true`, `secure: false`,
+`sameSite: "Lax"`, and no `Max-Age`/`Expires`. `sameSite: "None"`
+automatically turns on `Secure`. `clearCookie` emits `Max-Age=0` and an
+`Expires` date in the past. Names must be HTTP tokens, values may not contain
+`;` or control characters, and both functions return `false` on invalid
+input. `expires` (an HTTP date string) and `domain` are also accepted.
+
+Security primitives (built in, no imports):
+
+| Function | Result |
+| --- | --- |
+| `randomBytes(n)` | `2*n` lowercase hex characters from a CSPRNG; `n` is 1..4095 |
+| `uuid()` | random (v4) UUID string |
+| `sessionId()` | 32 random bytes as 43-character base64url text |
+| `sha256(s)` | SHA-256 of `s` as 64 lowercase hex characters |
+| `hmac(key, message)` | HMAC-SHA256 as 64 lowercase hex characters |
+| `base64Encode(s)` / `base64Decode(s)` | standard base64 with `=` padding |
+| `safeEqual(a, b)` | constant-time string comparison, returns a bool |
+| `passwordHash(password)` | salted PBKDF2-HMAC-SHA256 string |
+| `passwordVerify(password, hash)` | constant-time check against a `passwordHash` value |
+
+`passwordHash` uses a random 16-byte salt, 210,000 PBKDF2 iterations and a
+32-byte key, stored as `pbkdf2-sha256$<iterations>$<salt_b64>$<hash_b64>`.
+The format is self-describing, so the cost can be raised later without
+invalidating existing hashes (`passwordVerify` accepts 1,000..1,000,000
+iterations). On Unix the backend is OpenSSL; on Windows it is CNG/BCrypt.
+
+**Sessions.** There is no hidden session store: generate the ID on the server,
+keep it in a global map, and carry it in an `HttpOnly` cookie. The cookie value
+alone is not trusted; look it up and check expiry on every request.
 
 ```nac
-http("GET", "https://example.com");
-http("POST", "https://example.com", "{\"a\":1}");
+sessions = {}                            // sid -> { username, expires }
+SESSION_TTL = 86400
+
+route POST "/login" {
+    // ... verify the password with passwordVerify(...)
+    sid = sessionId()
+    sessions[sid] = { username: user.username, expires: now() + SESSION_TTL }
+    setCookie("sid", sid, { maxAge: SESSION_TTL, httpOnly: true, sameSite: "Lax" })
+    return json({ ok: true })
+}
+
+route GET "/me" {
+    sid = cookie.sid
+    if isNull(sid) or type(sid) != "string" or sid == "" {
+        return json({ error: "authentication required" }, 401)
+    }
+    s = sessions[sid]
+    if isNull(s) or s.expires <= now() {
+        return json({ error: "authentication required" }, 401)
+    }
+    return json({ username: s.username })
+}
 ```
 
-### Server
+See `examples/web/06_accounts.nac` for register/login/logout, protected
+routes, role checks and a JSON-file user store.
+
+**Server hardening (always on).**
+
+| Limit | Default |
+| --- | --- |
+| Request header block | 16 KiB, else `431` |
+| Request body | 8191 bytes, else `413` |
+| Whole-request read deadline | 10 seconds, else `408` |
+| Requests per client IP | 120 per 60-second fixed window, else `429` + `Retry-After` |
+| Concurrent connections | 64 |
+
+Every dynamic and static response also carries
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and
+`Referrer-Policy: no-referrer`. Response header names or values containing
+CR/LF are dropped, so a script-supplied value cannot inject extra headers.
+The rate limiter keeps up to 1024 client IPs in memory and uses the socket
+address, not `X-Forwarded-For`; behind a reverse proxy all requests look like
+they come from the proxy unless the proxy is configured accordingly.
+
+## 14) HTTP client and JSON
 
 ```nac
-fn handler(method, path, query, headers, body) {
-    rn "hello";                       // plain string -> 200, body = that string
-    // or:
-    resp = map();
-    resp["status"] = 404;
-    resp["body"] = "not found";
-    resp["headers"] = map();          // optional extra response headers
-    rn resp;
-};
-serve(8080, "handler");                 // blocking, runs forever
+res = http.get { url: "https://api.example.com/users/1" }
+print(res.status, res.ok, res.data.name)
+
+res = http.post {
+    url: "https://api.example.com/users",
+    body: { name: "Ada" },                  // map/array -> sent as JSON; string -> sent as-is
+    headers: { "Authorization": "Bearer abc" },
+    timeout: 10                             // seconds, default 30
+}
+
+http.get {
+    url: "https://api.example.com/users",
+    callback: fn(r) { print(len(r.data), "users") }
+}
+
+jsonParse(text)   jsonStringify(value)
 ```
 
-Constraints:
+**`http.<method> { options }`** -- `<method>` is `get`, `post`, `put`, `patch` or
+`delete`; the options map must follow the method on the same line. Options:
 
-- As of v3.6.0, `serve()` handles connections concurrently — one thread
-  per connection, capped at 64 in flight (further connections simply wait
-  for a slot). Accepting connections, reading requests, and writing
-  responses run fully in parallel. The actual call into your handler
-  function is still serialized behind an internal lock, since the
-  interpreter's variables and call stack are shared global state — this
-  is what makes it safe for two concurrent requests to read/write the
-  same global variable. In practice this is rarely a bottleneck, but a
-  handler that blocks for a long time (e.g. calls `sleep()`) will make
-  other requests wait for the duration of that call.
-- `method` / `path` / `body` are strings; `query` / `headers` are
-  `map<string, string>`.
-- `body` / `path` / header values are capped at 8192 characters
-  (`MAX_STRING_LEN`), same as the rest of the language.
+| Key        | Meaning                                                              |
+| ---------- | -------------------------------------------------------------------- |
+| `url`      | required, `http://` or `https://`                                    |
+| `body`     | string (sent as-is) or map/array (sent as JSON); not allowed for `get` |
+| `headers`  | map of header name -> value (`Content-Type: application/json` is added when there is a body, unless you set it) |
+| `timeout`  | seconds, default 30                                                  |
+| `callback` | function called with the response when it arrives                    |
 
----
+**The response** is a map, so it can be assigned to a variable:
 
-## 14) JSON
+| Field    | Meaning                                                         |
+| -------- | --------------------------------------------------------------- |
+| `status` | HTTP status code, `0` if no response was received               |
+| `ok`     | `true` for 2xx                                                  |
+| `body`   | response text (limited to 8192 characters)                      |
+| `data`   | the body parsed as JSON when it is JSON, otherwise `null`       |
+| `error`  | `null`, or a message when the request itself failed (no connection, timeout, ...) |
+
+HTTP 4xx/5xx and network failures do **not** stop the script: check `res.ok`
+(and `res.error`).
+
+**Callbacks** are called once the response is in, before the `http.<method>`
+expression finishes (the call is still blocking -- true async is on the
+roadmap). The response is also the value of the expression, so you can use a
+callback and assign the result at the same time. A callback can be an inline
+`fn(r) { ... }` or the name of a declared function (`callback: onDone`).
+
+## 15) Conversion and builtins
 
 ```nac
-jsonParse(jsonString)          // string -> array/map/int/float/string/bool
-jsonStringify(value)            // array/map/... -> string
-```
-
-`true` / `false` in JSON round-trip through NaC's `bool` type, not `1`/`0`.
-
----
-
-## 15) Type conversion / introspection
-
-```nac
-typeOf(x)        // "int" | "float" | "bool" | "null" | "string" | "array" | "map"
-isNull(x)
-toInt(x)
-toFloat(x)
-toString(x)
-urlEncode(s)
-urlDecode(s)
-```
-
----
-
-## 16) CLI support
-
-```nac
-args()           // array of arguments after the script name
-env("NAME")      // read an environment variable ("" if unset)
-exit(code)       // terminate the program immediately
-```
-
----
-
-## 17) Math functions
-
-```
+str(x) int(x) float(x) type(x) isNull(x)         // Python-style
+toString toInt toFloat typeOf                     // camelCase aliases
+urlEncode(s) urlDecode(s)
+args()  env("NAME")  exit(code)                   // CLI tools
 sqrt pow sin cos tan abs floor ceil round log exp
+len upper lower trim replace substr indexOf contains split
 ```
 
----
+## 16) Removed in v1.1 (old syntax)
 
-## 18) String functions
+`rn` (use `return`), `out(...)` (use `print`), `in(x)` (use `input()`),
+`: { }` as else (use `else`/`elif`), C-style `for (i = 0; ...; i++)` (use
+`for i in range(...)` or `while`), `http("GET", url)` (use `http.get { url: ... }`),
+`time()` (use `now()`), `serve(port, "handler")` (use `route`), mandatory `;`.
 
-```
-length upper lower trim replace substr indexOf split contains
-toString urlEncode urlDecode
-```
+## 17) Removed: the old HTTP client functions
 
----
-
-## 19) Function-call syntax notes
-
-- A call is always `name(arg1, arg2, ...)`.
-- Whitespace between the name and `(` is fine (`name (arg)` works) since
-  the lexer skips whitespace.
-- No method-call / dot syntax (`object.method()`).
-- No anonymous functions / lambdas.
-
----
-
-## 20) Example combining most of the above
-
-```nac
-fn classify(x) {
-    if (x < 0) {
-        rn "negative";
-    } : if (x == 0) {
-        rn "zero";
-    } : {
-        rn "positive";
-    };
-};
-
-numbers = [1, 2, 3, 4, 5];
-total = 0;
-for (i = 0; i < length(numbers); i++) {
-    total = total + numbers[i];
-};
-
-out("Total: " + total);
-out(classify(-5));
-
-person = map();
-person["name"] = "Ada";
-person["age"] = 36;
-person["active"] = true;
-out(person["name"] + " is " + person["age"] + " years old");
-out(typeOf(person["active"]));   // "bool"
-```
-
----
-
-## 21) Known limitations / possible simplification candidates
-
-These are the roughest edges today — useful to keep in mind if you want to
-simplify the language further:
-
-- The mandatory `;` after every block's closing `}` (`if`/`for`/`while`/`fn`)
-  is the most common source of parse errors; most C-like languages don't
-  require this.
-- `:` instead of the `else` keyword reads less naturally to most people
-  coming from other languages.
-- No map literal syntax (`{"a": 1}`) — verbose for JSON-heavy backend code.
-- No first-class functions / callbacks — you can't write a generic
-  `map(array, fn)` helper because a function name can't be stored in a
-  variable and called through it (only referenced by string, as `serve()`
-  does).
-- No multi-level indexing (`arr[i][j]`, `obj["a"]["b"]`) — awkward for
-  nested JSON-like data.
-- `serve()` parallelizes I/O across connections, but each handler call
-  is still serialized behind a lock (the interpreter's variables/call
-  stack are shared global state) — a slow handler (e.g. one that calls
-  `sleep()` or does heavy computation) will delay other requests for its
-  duration, rather than truly running alongside them.
+`httpGet(url)`, `httpPost(url, body)`, `httpPut(url, body)`, `httpPatch(url, body)`,
+`httpDelete(url)`, `httpRequest(method, url)` and `httpJson(method, url)` are gone.
+Use `http.get { url: ... }`, `http.post { url: ..., body: ... }` etc. -- the parsed
+JSON that `httpJson` returned is `res.data`, the raw text is `res.body`.

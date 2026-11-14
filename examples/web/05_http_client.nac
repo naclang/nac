@@ -1,0 +1,33 @@
+// Example: HTTP Requests in NaC Language
+// ------------------------------------------
+// Yazim:  http.<yontem> { ayarlar }     (get, post, put, patch, delete)
+// Sonuc bir map: status, ok, body, data (JSON ise parse edilmis), error
+
+print("\n=== HTTP GET ORNEGI ===")
+res = http.get { url: "https://api.ipify.org/?format=json" }
+print(res.status, res.ok)
+print("ip:", res.data.ip)
+
+print("\n=== HTTP POST ORNEGI ===")
+res = http.post {
+    url: "https://httpbin.org/post",
+    body: { mesaj: "Merhaba", dil: "NaC" },      // map/array -> JSON olarak gider
+    headers: { "X-Demo": "nac" }
+}
+print(res.status, res.data.json.mesaj)
+
+print("\n=== HTTP PUT ORNEGI ===")
+res = http.put { url: "https://httpbin.org/put", body: { guncelleme: "Bu bir PUT istegi" } }
+print(res.status)
+
+print("\n=== HTTP DELETE ORNEGI ===")
+res = http.delete { url: "https://httpbin.org/delete" }
+print(res.status)
+
+print("\n=== CALLBACK ORNEGI ===")
+http.get {
+    url: "https://api.ipify.org/?format=json",
+    callback: fn(r) {
+        if r.ok { print("callback ip:", r.data.ip) } else { print("hata:", r.error) }
+    }
+}

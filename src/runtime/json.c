@@ -353,6 +353,28 @@ bool json_parse_value(const char *json, Value *out) {
     return true;
 }
 
+/* Like json_parse_value(), but silent: returns false on bad input without
+ * calling report_error(). Used for the optional `data` field of HTTP
+ * responses, where a non-JSON body is perfectly normal. */
+bool json_try_parse_value(const char *json, Value *out) {
+    if (!json || !out) {
+        return false;
+    }
+
+    const char *p = json;
+    if (!parse_value(&p, out, 0)) {
+        return false;
+    }
+
+    skip_ws(&p);
+    if (*p != '\0') {
+        free_value(out);
+        return false;
+    }
+
+    return true;
+}
+
 static void stringify_escaped_string(StrBuilder *sb, const char *s) {
     sb_append_char(sb, '"');
     for (size_t i = 0; s[i] != '\0'; i++) {
@@ -417,6 +439,10 @@ static void stringify_value(StrBuilder *sb, Value value) {
                 stringify_value(sb, value.map_val.values[i]);
             }
             sb_append_char(sb, '}');
+            break;
+
+        case TYPE_FUNC:
+            sb_append_str(sb, "null");   /* functions have no JSON form */
             break;
     }
 }

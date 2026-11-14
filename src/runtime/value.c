@@ -40,6 +40,14 @@ Value make_string(const char *s) {
     return val;
 }
 
+Value make_func(const char *name) {
+    Value val;
+    val.type = TYPE_FUNC;
+    strncpy(val.str_val, name, MAX_STRING_LEN - 1);
+    val.str_val[MAX_STRING_LEN - 1] = '\0';
+    return val;
+}
+
 Value make_array(int size) {
     Value val;
     val.type = TYPE_ARRAY;
@@ -85,6 +93,7 @@ double to_float(Value v) {
         case TYPE_NULL: return 0.0;
         case TYPE_ARRAY: return 0.0;
         case TYPE_MAP: return 0.0;
+        case TYPE_FUNC: return 0.0;
     }
     return 0.0;
 }
@@ -98,6 +107,7 @@ int to_int(Value v) {
         case TYPE_NULL: return 0;
         case TYPE_ARRAY: return v.array_val.size;
         case TYPE_MAP: return v.map_val.size;
+        case TYPE_FUNC: return 0;
     }
     return 0;
 }
@@ -111,6 +121,7 @@ int to_bool(Value v) {
         case TYPE_NULL: return 0;
         case TYPE_ARRAY: return v.array_val.size > 0;
         case TYPE_MAP: return v.map_val.size > 0;
+        case TYPE_FUNC: return 1;
     }
     return 0;
 }
@@ -122,6 +133,7 @@ void print_value(Value v) {
         case TYPE_STRING: printf("%s\n", v.str_val); break;
         case TYPE_BOOL: printf("%s\n", v.int_val ? "true" : "false"); break;
         case TYPE_NULL: printf("null\n"); break;
+        case TYPE_FUNC: printf("<fn>\n"); break;
         case TYPE_ARRAY:
             printf("[");
             for (int i = 0; i < v.array_val.size; i++) {
@@ -134,6 +146,7 @@ void print_value(Value v) {
                     case TYPE_NULL: printf("null"); break;
                     case TYPE_ARRAY: printf("[...]"); break;
                     case TYPE_MAP: printf("{...}"); break;
+                    case TYPE_FUNC: printf("<fn>"); break;
                 }
             }
             printf("]\n");
@@ -151,6 +164,7 @@ void print_value(Value v) {
                     case TYPE_NULL: printf("null"); break;
                     case TYPE_ARRAY: printf("[...]"); break;
                     case TYPE_MAP: printf("{...}"); break;
+                    case TYPE_FUNC: printf("<fn>"); break;
                 }
             }
             printf("}\n");

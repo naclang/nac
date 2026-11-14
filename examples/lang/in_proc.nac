@@ -1,0 +1,18 @@
+// Example: User Input and Processing
+// ---------------------------------------------------
+
+count = int(input("How many numbers will you enter? "))
+
+numbers = []
+print("Enter the numbers:")
+
+for i in range(count) {
+    push(numbers, int(input("Num " + (i + 1) + ": ")))
+}
+
+total = 0
+for n in numbers {
+    total += n
+}
+
+print("Average:", total / count)
