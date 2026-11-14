@@ -39,6 +39,7 @@ serve(8080)
 | Add an endpoint                      | `route GET "/users/:id" { ... }` — path params arrive in `params`, `?query=` in `query`, plus `headers` and `body` |
 | Serve a folder of static files       | `static("public")` — MIME types, `index.html`, raw bytes up to 32 MB |
 | Return JSON / HTML / a redirect      | `json(value, status)`, `html(text, status)`, `redirect(url)`   |
+| Render an HTML template               | `render("page.html", { title: ... })` — `{{ title }}` is HTML-escaped |
 | Read a JSON request body             | `jsonParse(body)`                                              |
 | Read and set cookies                 | `cookie.name` in a route, `setCookie(name, value, { ... })`, `clearCookie(name)` |
 | Add login and sessions               | `passwordHash` / `passwordVerify`, `sessionId()`, `randomBytes(n)`, `uuid()` |
@@ -50,8 +51,9 @@ serve(8080)
 | Keep shared state (counters, caches) | plain global variables — no locks, no imports                  |
 | Ship it                              | `./nac build app.nac` → one native executable                  |
 
-Scripts are plain files: no framework to choose, no config file, and no
-`main()`. The whole language fits in [docs/SYNTAX.md](docs/SYNTAX.md).
+Scripts are plain files: no framework to choose, no required config file, and
+no `main()`. An optional `.env` file is loaded automatically. The whole
+language fits in [docs/SYNTAX.md](docs/SYNTAX.md).
 
 Shared state is safe by construction: handler calls are serialized behind one
 lock, so two requests can never interleave inside your script. That is a
@@ -101,12 +103,29 @@ Start with the web examples (run from the project root):
 | `examples/web/04_api_gateway.nac`     | a route that calls another API, with a callback and a 502 fallback |
 | `examples/web/05_http_client.nac`     | the HTTP client on its own: GET/POST/PUT/DELETE, headers, callbacks |
 | `examples/web/06_accounts.nac`        | register/login/logout, `HttpOnly` sessions, protected routes and role checks |
+| `examples/web/07_request_helpers.nac` | URL-encoded forms, response headers, CORS and preflight |
+| `examples/web/08_templates.nac`       | HTML templates with escaped placeholders                 |
+| `examples/web/09_config.nac`          | `.env`, `env()` defaults and `serve()` configuration      |
 | `examples/web/site/site.nac`          | a complete site: static files + routes + redirect             |
 | `examples/lang/`                      | language tour: `syntax.nac`, `try.nac`, algorithms, a CLI tool |
 
 ```bash
 ./nac examples/web/02_json_api.nac
 curl -X POST -d '{"title":"buy milk"}' http://localhost:8080/todos
+```
+
+For automatic restarts when the script or `.env` changes, run
+`nac dev examples/web/08_templates.nac`.
+Run language and in-process route checks with `nac test examples/lang/request_test.nac`.
+Check configuration defaults with `nac test examples/lang/config_test.nac`.
+
+At startup, NaC loads `.env` from the working directory if present. Existing
+process environment variables take precedence. `env("PORT", "8080")` returns
+the default only when `PORT` is unset; `serve()` uses `PORT` or falls back to
+8080. An explicit `serve(port)` overrides the configured value.
+
+```dotenv
+PORT=8081
 ```
 
 ## Installation
@@ -186,10 +205,11 @@ stub that runs it, compiled alongside the same interpreter sources
 
 ## Testing
 
-There's no formal test runner yet — run the example scripts and check
-the output:
+Use `assert()` for failing checks and `request(method, path, [body, headers])`
+to exercise registered routes without opening a network port:
 
 ```bash
+nac test examples/lang/request_test.nac
 for f in examples/lang/*.nac; do echo "=== $f ==="; ./nac "$f" < /dev/null; done
 ```
 

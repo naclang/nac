@@ -31,6 +31,7 @@ extern Value return_value;
 
 extern bool error_occurred;
 extern int error_count;
+extern bool nac_test_mode;
 
 /* try/catch support. While try_depth > 0, report_error() does not print or
  * count: it stores the first message in caught_error and sets error_pending,

@@ -57,7 +57,7 @@ bool is_builtin_function(const char *name) {
         "typeOf", "toInt", "toFloat", "toString", "isNull",
         "urlEncode", "urlDecode",
         "now", "array", "range", "keys", "values", "sleep",
-        "input", "len", "str", "int", "float", "type"
+        "input", "len", "str", "int", "float", "type", "assert"
     };
     int builtin_count = sizeof(builtins) / sizeof(builtins[0]);
     for (int i = 0; i < builtin_count; i++) {
@@ -80,6 +80,22 @@ static const char *canonical_builtin(const char *name) {
 
 Value call_builtin_function(const char *name, Value *args, int arg_count) {
     name = canonical_builtin(name);
+
+    if (strcmp(name, "assert") == 0) {
+        if (arg_count < 1 || arg_count > 2) {
+            report_error("assert() requires (condition, [message])");
+            return make_bool(0);
+        }
+        if (!to_bool(args[0])) {
+            char msg[512] = "Assertion failed";
+            if (arg_count == 2) {
+                value_to_display_string(args[1], msg, sizeof(msg));
+            }
+            report_error(msg);
+            return make_bool(0);
+        }
+        return make_bool(1);
+    }
 
     if (strcmp(name, "input") == 0) {
         /* input() / input("prompt") -> next line from stdin as a string, null at EOF */

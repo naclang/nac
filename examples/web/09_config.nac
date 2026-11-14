@@ -1,0 +1,14 @@
+// examples/web/09_config.nac -- .env, env() defaults and serve()
+//
+// Optional .env in the project root:
+//   PORT=8081
+//
+// The process environment takes precedence over .env.
+route GET "/" {
+    return json({
+        message: "Configuration loaded",
+        port: env("PORT", "8080")
+    })
+}
+
+serve()

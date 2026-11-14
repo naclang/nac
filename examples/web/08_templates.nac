@@ -1,0 +1,22 @@
+// examples/web/08_templates.nac -- render() escapes values by default
+//
+// Run from the project root:
+//   ./nac examples/web/08_templates.nac
+// Open the root page or /hello/<your-name> in a browser.
+
+fn greetingPage(name) {
+    return render("examples/web/templates/greeting.html", {
+        title: name,
+        name: name
+    })
+}
+
+route GET "/" {
+    return greetingPage("NaC")
+}
+
+route GET "/hello/:name" {
+    return greetingPage(params.name)
+}
+
+serve(8890)

@@ -7,6 +7,8 @@
 #include "../lexer/lexer.h"
 #include "../parser/parser.h"
 #include "../runtime/eval.h"
+#include "../util/error.h"
+#include "config.h"
 
 char *code = NULL;
 int pos = 0;
@@ -27,6 +29,7 @@ Value return_value;
 
 bool error_occurred = false;
 int error_count = 0;
+bool nac_test_mode = false;
 
 int try_depth = 0;
 bool error_pending = false;
@@ -50,9 +53,15 @@ void init_interpreter(void) {
     return_value = make_int(0);
     error_occurred = false;
     error_count = 0;
+    nac_test_mode = false;
     try_depth = 0;
     error_pending = false;
     caught_error[0] = '\0';
+
+    char config_error[512];
+    if (nac_load_dotenv(".env", config_error, sizeof(config_error)) < 0) {
+        report_error(config_error);
+    }
 }
 
 void set_source_code(char *source) {
@@ -62,6 +71,11 @@ void set_source_code(char *source) {
 }
 
 int run_interpreter(void) {
+    if (error_occurred) {
+        fprintf(stderr, "\nExecution completed with %d error(s).\n", error_count);
+        return 1;
+    }
+
     init_lexer();
     next_token();
 
@@ -70,6 +84,10 @@ int run_interpreter(void) {
         if (stmt) {
             eval_node(stmt);
             free_ast(stmt);
+        }
+
+        if (nac_test_mode && error_occurred) {
+            break;
         }
 
         if (error_count > 10) {

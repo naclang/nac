@@ -1,0 +1,35 @@
+// examples/web/07_request_helpers.nac -- form(), header() ve cors()
+//
+// Calistir:  ./nac examples/web/07_request_helpers.nac
+// Deneme:    curl -i -X POST -d "name=Ada" http://localhost:8080/api/greet
+//
+// Tarayicidan localhost:3000 origin'inden erisime izin veren bir ornek.
+ORIGIN = "http://localhost:3000"
+
+route OPTIONS "/api/greet" {
+    return {
+        status: 204,
+        body: "",
+        headers: cors(ORIGIN, "POST, OPTIONS", "Content-Type")
+    }
+}
+
+route POST "/api/greet" {
+    data = form(body)
+    if not ("name" in data) or data.name == "" {
+        return json({ error: "name is required" }, 400)
+    }
+
+    headers = cors(ORIGIN, "POST, OPTIONS", "Content-Type")
+    extra = header("X-NaC-Example", "request-helpers")
+    headers["X-NaC-Example"] = extra["X-NaC-Example"]
+    headers["Content-Type"] = "application/json; charset=utf-8"
+
+    return {
+        status: 200,
+        body: jsonStringify({ message: "Hello, " + data.name }),
+        headers: headers
+    }
+}
+
+serve(8080)
