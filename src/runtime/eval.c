@@ -844,10 +844,71 @@ Value eval_node(ASTNode *node) {
             return result;
         }
 
+        case AST_MULTI_INDEX:
+            report_error("Multiple map keys are only valid in assignments");
+            return make_null();
+
         case AST_INDEX_ASSIGN: {
             ASTNode *t = node->index_assign.target;
             Value val = eval_node(node->index_assign.value);
             if (error_pending) { free_value(&val); return make_null(); }
+
+            if (t->type == AST_MULTI_INDEX) {
+                Value *container = lvalue_ptr(t->multi_index.object);
+                if (!container) {
+                    report_error("Cannot assign: the container is undefined or missing");
+                    free_value(&val);
+                    return make_null();
+                }
+                if (container->type != TYPE_MAP) {
+                    report_error("Multiple index assignment requires a map");
+                    free_value(&val);
+                    return make_null();
+                }
+                if (val.type != TYPE_ARRAY ||
+                    val.array_val.size != t->multi_index.count) {
+                    report_error("Map multi-assignment needs the same number of keys and values");
+                    free_value(&val);
+                    return make_null();
+                }
+
+                Value *indexes = (Value*)calloc((size_t)t->multi_index.count, sizeof(Value));
+                if (!indexes) {
+                    report_error("Out of memory assigning map keys");
+                    free_value(&val);
+                    return make_null();
+                }
+
+                int valid = 1;
+                for (int i = 0; i < t->multi_index.count; i++) {
+                    indexes[i] = eval_node(t->multi_index.indexes[i]);
+                    if (error_pending) {
+                        valid = 0;
+                        break;
+                    }
+                    char key[1024];
+                    if (!key_from_value(indexes[i], key, sizeof(key))) {
+                        report_error("Map key must be int, float, string, or bool");
+                        valid = 0;
+                        break;
+                    }
+                }
+
+                if (valid) {
+                    for (int i = 0; i < t->multi_index.count; i++) {
+                        char key[1024];
+                        key_from_value(indexes[i], key, sizeof(key));
+                        map_set(container, key, val.array_val.elements[i]);
+                    }
+                }
+                for (int i = 0; i < t->multi_index.count; i++) {
+                    free_value(&indexes[i]);
+                }
+                free(indexes);
+                free_value(&val);
+                return make_null();
+            }
+
             Value *container = lvalue_ptr(t->index.object);
             if (!container) {
                 report_error("Cannot assign: the container is undefined or missing");

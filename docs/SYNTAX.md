@@ -138,10 +138,12 @@ person.age += 1
 keys(person)  values(person)  len(person)
 delete(person, "age")           // true if the key existed, false otherwise
 map()                           // empty map
+m["name", "year", 3.14] = "Ada", 2026, "pi"  // assign several keys at once
 ```
 
 Bare identifier keys are strings. Keys must be int, float, string or bool.
-No key deletion yet.
+Multi-key assignment requires the same number of keys and values. No key
+deletion yet.
 
 ## 9) if / elif / else
 

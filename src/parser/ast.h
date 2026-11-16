@@ -25,6 +25,7 @@ typedef enum {
     AST_BOOL_LITERAL,
     AST_NULL_LITERAL,
     AST_INDEX,
+    AST_MULTI_INDEX,
     AST_INDEX_ASSIGN,
     AST_MAP_LITERAL,
     AST_FOREACH,
@@ -90,6 +91,11 @@ typedef struct ASTNode {
             struct ASTNode *object;
             struct ASTNode *index;
         } index;
+        struct {
+            struct ASTNode *object;
+            struct ASTNode **indexes;
+            int count;
+        } multi_index;
         struct {
             struct ASTNode *target; /* an AST_INDEX node */
             struct ASTNode *value;

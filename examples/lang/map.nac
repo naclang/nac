@@ -1,9 +1,8 @@
 m = map()
-m["name"] = "NaC"
-m["year"] = 2026
-m[3.14] = "pi"
+m["name", "year", 3.14] = "NaC", 2026, "pi"
 
-print(m["name"])
-print(m["year"])
-print(m[3.14])
-print(length(m))
+for key in m {
+    print(m[key])
+}
+
+print("\nlength: " + length(m))

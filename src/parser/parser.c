@@ -81,6 +81,13 @@ void free_ast(ASTNode *node) {
             free_ast(node->index.object);
             free_ast(node->index.index);
             break;
+        case AST_MULTI_INDEX:
+            free_ast(node->multi_index.object);
+            for (int i = 0; i < node->multi_index.count; i++) {
+                free_ast(node->multi_index.indexes[i]);
+            }
+            free(node->multi_index.indexes);
+            break;
         case AST_INDEX_ASSIGN:
             free_ast(node->index_assign.target);
             free_ast(node->index_assign.value);
@@ -400,11 +407,34 @@ static ASTNode *parse_primary(void) {
         if (current_token.type == TOK_LBRACKET && !current_token.nl_before) {
             next_token();
             ASTNode *idx = parse_expression();
-            expect(TOK_RBRACKET);
-            ASTNode *n = create_node(AST_INDEX);
-            n->index.object = node;
-            n->index.index = idx;
-            node = n;
+            if (current_token.type == TOK_COMMA) {
+                ASTNode *n = create_node(AST_MULTI_INDEX);
+                int capacity = 4;
+                n->multi_index.object = node;
+                n->multi_index.indexes = (ASTNode**)malloc(sizeof(ASTNode*) * capacity);
+                n->multi_index.indexes[0] = idx;
+                n->multi_index.count = 1;
+
+                while (current_token.type == TOK_COMMA) {
+                    next_token();
+                    if (current_token.type == TOK_RBRACKET) break;
+
+                    if (n->multi_index.count >= capacity) {
+                        capacity *= 2;
+                        n->multi_index.indexes = (ASTNode**)realloc(
+                            n->multi_index.indexes, sizeof(ASTNode*) * capacity);
+                    }
+                    n->multi_index.indexes[n->multi_index.count++] = parse_expression();
+                }
+                expect(TOK_RBRACKET);
+                node = n;
+            } else {
+                expect(TOK_RBRACKET);
+                ASTNode *n = create_node(AST_INDEX);
+                n->index.object = node;
+                n->index.index = idx;
+                node = n;
+            }
         } else if (current_token.type == TOK_DOT) {
             next_token();
             if (current_token.type != TOK_IDENT) {
@@ -872,6 +902,36 @@ ASTNode *parse_statement(void) {
             NaCTokenType compound_op = is_compound_assign(current_token.type) ? compound_to_op(current_token.type) : TOK_EOF;
             next_token();
             ASTNode *value = parse_expression();
+
+            if (target->type == AST_MULTI_INDEX && compound_op == TOK_EOF) {
+                ASTNode *values = create_node(AST_ARRAY_LITERAL);
+                int capacity = 4;
+                values->array_literal.elements = (ASTNode**)malloc(sizeof(ASTNode*) * capacity);
+                values->array_literal.elements[0] = value;
+                values->array_literal.count = 1;
+
+                while (current_token.type == TOK_COMMA) {
+                    next_token();
+                    if (current_token.type == TOK_SEMI ||
+                        current_token.type == TOK_RBRACE ||
+                        current_token.type == TOK_EOF) {
+                        break;
+                    }
+                    if (values->array_literal.count >= capacity) {
+                        capacity *= 2;
+                        values->array_literal.elements = (ASTNode**)realloc(
+                            values->array_literal.elements, sizeof(ASTNode*) * capacity);
+                    }
+                    values->array_literal.elements[values->array_literal.count++] = parse_expression();
+                }
+
+                ASTNode *node = create_node(AST_INDEX_ASSIGN);
+                node->index_assign.target = target;
+                node->index_assign.value = values;
+                node->index_assign.compound_op = TOK_EOF;
+                end_stmt();
+                return node;
+            }
 
             if (target->type == AST_VARIABLE) {
                 ASTNode *node = create_node(AST_ASSIGN);
