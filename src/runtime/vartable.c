@@ -65,8 +65,9 @@ void set_var(const char *name, Value value) {
         VarEntry *entry = local->buckets[idx];
         while (entry) {
             if (strcmp(entry->name, name) == 0) {
+                Value copy = copy_value(value);
                 free_value(&entry->value);
-                entry->value = copy_value(value);
+                entry->value = copy;
                 return;
             }
             entry = entry->next;
@@ -79,8 +80,9 @@ void set_var(const char *name, Value value) {
         VarEntry *global_entry = global_vars->buckets[idx];
         while (global_entry) {
             if (strcmp(global_entry->name, name) == 0) {
+                Value copy = copy_value(value);
                 free_value(&global_entry->value);
-                global_entry->value = copy_value(value);
+                global_entry->value = copy;
                 return;
             }
             global_entry = global_entry->next;
@@ -99,8 +101,9 @@ void set_var(const char *name, Value value) {
     VarEntry *entry = global_vars->buckets[idx];
     while (entry) {
         if (strcmp(entry->name, name) == 0) {
+            Value copy = copy_value(value);
             free_value(&entry->value);
-            entry->value = copy_value(value);
+            entry->value = copy;
             return;
         }
         entry = entry->next;
@@ -121,8 +124,9 @@ void declare_local_var(const char *name, Value value) {
     VarEntry *entry = table->buckets[idx];
     while (entry) {
         if (strcmp(entry->name, name) == 0) {
+            Value copy = copy_value(value);
             free_value(&entry->value);
-            entry->value = copy_value(value);
+            entry->value = copy;
             return;
         }
         entry = entry->next;

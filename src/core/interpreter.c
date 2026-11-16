@@ -1,4 +1,5 @@
 #include "interpreter.h"
+#include "../builtin/db_builtin.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -105,6 +106,7 @@ int run_interpreter(void) {
 }
 
 void shutdown_interpreter(void) {
+    nac_db_close_all();
     free(code);
     free_lexer();
     free_var_table(global_vars);

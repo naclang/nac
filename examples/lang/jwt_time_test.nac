@@ -1,0 +1,83 @@
+// examples/lang/jwt_time_test.nac -- JWT and date/time builtins
+// Run with:  nac test examples/lang/jwt_time_test.nac
+
+secret = "test-secret-0123456789-abcdefghij"
+
+// ---- jwtSign: output matches an independent HS256 implementation --------
+token = jwtSign({ sub: "1", role: "admin" }, secret)
+assert(token == "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwicm9sZSI6ImFkbWluIn0.Mb2cJZUoErvKCF6iL9b40QitougMEJjHXK9rojpr_uA", "jwtSign known vector")
+
+// ---- jwtVerify: round trip and claims ------------------------------------
+claims = jwtVerify(token, secret)
+assert(not isNull(claims), "valid token verifies")
+assert(claims.sub == "1" and claims.role == "admin", "claims come back")
+
+// exp far beyond 2038 must not wrap around (NaC ints are 32-bit)
+far = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwiZXhwIjo0MTAyNDQ0ODAwfQ.JMMuSQUsC3NEMR5_8TNxCJwipuiNF7H6Y7o7aDFH_sA"
+assert(jwtVerify(far, secret).sub == "2", "exp in year 2100 is still valid")
+
+// ---- jwtVerify: everything untrustworthy is null -------------------------
+assert(isNull(jwtVerify(token, "another-secret")), "wrong secret")
+assert(isNull(jwtVerify(token + "x", secret)), "corrupted signature")
+assert(isNull(jwtVerify("a.b", secret)), "two parts")
+assert(isNull(jwtVerify("", secret)), "empty token")
+assert(isNull(jwtVerify("not a token at all", secret)), "garbage")
+
+parts = split(token, ".")
+forged = parts[0] + "." + base64Encode("{\"sub\":\"1\",\"role\":\"root\"}") + "." + parts[2]
+assert(isNull(jwtVerify(forged, secret)), "payload swapped, signature kept")
+
+// alg:none must never be accepted, even with a "valid" empty signature
+none_header = replace(replace(base64Encode("{\"alg\":\"none\",\"typ\":\"JWT\"}"), "=", ""), "+", "-")
+assert(isNull(jwtVerify(none_header + "." + parts[1] + ".", secret)), "alg none")
+
+// ---- expiry and not-before ------------------------------------------------
+expired = jwtSign({ sub: "1", exp: now() - 10 }, secret)
+assert(isNull(jwtVerify(expired, secret)), "expired token")
+fresh = jwtSign({ sub: "1", exp: now() + 3600 }, secret)
+assert(not isNull(jwtVerify(fresh, secret)), "unexpired token")
+early = jwtSign({ sub: "1", nbf: now() + 3600 }, secret)
+assert(isNull(jwtVerify(early, secret)), "not valid yet")
+
+// ---- argument errors are reported, not silently accepted -------------------
+threw = false
+try { jwtSign({ a: 1 }, "") } catch e { threw = contains(e, "secret") }
+assert(threw, "empty secret is rejected")
+
+threw = false
+try { jwtSign("not a map", secret) } catch e { threw = contains(e, "jwtSign") }
+assert(threw, "payload must be a map")
+
+// ---- formatTime ------------------------------------------------------------
+assert(formatTime(0) == "1970-01-01T00:00:00Z", "epoch, default format")
+assert(formatTime(1731600000) == "2024-11-14T16:00:00Z", "default ISO format")
+assert(formatTime(1731600000, "%A, %d %B %Y %I:%M %p") == "Thursday, 14 November 2024 04:00 PM", "names and 12-hour clock")
+assert(formatTime(1731600000, "%a, %d %b %Y %H:%M:%S GMT") == "Thu, 14 Nov 2024 16:00:00 GMT", "HTTP date (Set-Cookie expires)")
+assert(formatTime(951782400, "%F %j") == "2000-02-29 060", "leap day, day of year")
+assert(formatTime(1731600000, "%F %T %z", "+03:00") == "2024-11-14 19:00:00 +0300", "fixed offset")
+assert(formatTime(1731600000.123, "%T.%L") == "16:00:00.123", "milliseconds from a float")
+assert(formatTime(-1, "%F %T") == "1969-12-31 23:59:59", "before 1970")
+assert(formatTime(1731600000, "100%% %s") == "100% 1731600000", "%% and %s")
+threw = false
+try { formatTime(0, "%Q") } catch e { threw = contains(e, "%Q") }
+assert(threw, "unknown specifier is an error")
+
+// ---- parseTime ---------------------------------------------------------------
+assert(parseTime("2024-11-14T16:00:00Z") == 1731600000, "ISO with Z")
+assert(parseTime("2024-11-14") == 1731542400, "date only is midnight UTC")
+assert(parseTime("2024-11-14 19:00:00+03:00") == 1731600000, "offset is applied")
+assert(parseTime("2024-11-14T16:00") == 1731600000, "no seconds")
+assert(parseTime("14/Nov/2024 04:00 PM", "%d/%b/%Y %I:%M %p") == 1731600000, "custom format")
+assert(parseTime("Thu, 14 Nov 2024 16:00:00 GMT", "%a, %d %b %Y %H:%M:%S %Z") == 1731600000, "HTTP date")
+assert(isNull(parseTime("2024-02-30")), "no such day")
+assert(isNull(parseTime("2024-13-01")), "no such month")
+assert(isNull(parseTime("yesterday")), "not a time")
+assert(isNull(parseTime("2024-11-14 and more")), "trailing text")
+assert(parseTime(formatTime(1700000000)) == 1700000000, "format/parse round trip")
+
+// ---- nowMs ---------------------------------------------------------------------
+ms = nowMs()
+assert(typeOf(ms) == "float", "nowMs is a float")
+assert(ms > 1700000000000, "nowMs is milliseconds since 1970")
+assert(len(str(floor(ms))) == 13, "prints in full, not 1.7e+12")
+assert(abs(ms / 1000 - now()) < 2, "nowMs and now agree")

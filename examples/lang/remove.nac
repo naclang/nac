@@ -1,0 +1,21 @@
+a = [10, 20, 30, 40]
+x = removeAt(a, 1)
+print(x)
+print(a)
+m = { name: "Ada", age: 36, city: "London" }
+print(delete(m, "age"))
+print(delete(m, "nope"))
+print(m)
+print(keys(m))
+m.age = 37
+print(m)
+try {
+    removeAt(a, 9)
+} catch (e) {
+    print("caught: " + e)
+}
+nested = { list: [1,2,3] }
+l = nested.list
+removeAt(l, 0)
+print(l)
+print(len(a))

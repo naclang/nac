@@ -433,11 +433,24 @@ static Value test_request(Value *args, int arg_count) {
     }
     strncpy(req.path, path, sizeof(req.path) - 1);
 
+    nac_header_reset();
     char fn[MAX_TOKEN_LEN];
     int path_matched = 0;
-    Value params = make_null();
+    int route_found = 0;
+    Value params = make_map();
     Value result = make_null();
-    if (router_match(req.method, req.path, fn, sizeof(fn), &params, &path_matched)) {
+    {
+        Value matched_params;
+        if (router_match(req.method, req.path, fn, sizeof(fn), &matched_params, &path_matched)) {
+            free_value(&params);
+            params = matched_params;
+            route_found = 1;
+        }
+    }
+
+    if (nac_run_before(&req, params, &result)) {
+        /* a before block answered */
+    } else if (route_found) {
         Value route_args[7] = {
             make_string(req.method), make_string(req.path), req.query, req.headers,
             make_string(req.body), params, req.cookie
@@ -447,12 +460,13 @@ static Value test_request(Value *args, int arg_count) {
             map_set(&result, "status", make_int(500));
             map_set(&result, "body", make_string("route handler not found"));
         }
-        free_value(&params);
     } else {
         result = make_map();
         map_set(&result, "status", make_int(path_matched ? 405 : 404));
         map_set(&result, "body", make_string(path_matched ? "Method Not Allowed" : "Not Found"));
     }
+    nac_finish_response(&req, params, &result, NULL, NULL, NULL);
+    free_value(&params);
 
     Value response = normalize_test_response(result);
     free_value(&result);
@@ -466,7 +480,7 @@ bool is_extended_builtin(const char *name) {
     const char *builtins[] = {
         "jsonParse", "jsonStringify",
         "args", "env", "exit", "serve", "static", "html", "json", "redirect",
-        "form", "header", "cors", "render", "request"
+        "form", "header", "setHeader", "cors", "render", "request"
     };
 
     int count = sizeof(builtins) / sizeof(builtins[0]);
@@ -519,13 +533,26 @@ Value call_extended_builtin(const char *name, Value *args, int arg_count) {
     }
 
     if (strcmp(name, "serve") == 0) {
-        /* serve([port]) uses PORT from the environment, or 8080 by default. */
-        if (arg_count > 1) {
-            report_error("serve() requires 0 or 1 argument (port)");
+        /* serve([port [, host]]). Port: --port flag, else the argument, else
+         * PORT from the environment, else 8080. Host: --host flag, else the
+         * argument, else NAC_HOST, else every interface. */
+        if (arg_count > 2) {
+            report_error("serve() requires 0 to 2 arguments (port, host)");
             return make_int(1);
         }
+        if (arg_count == 2 && args[1].type != TYPE_STRING) {
+            report_error("serve(): host must be a string");
+            return make_int(1);
+        }
+
+        char config_error[512];
+        if (nac_config_apply_env(config_error, sizeof(config_error)) != 0) {
+            report_error(config_error);
+            return make_int(1);
+        }
+
         int port = 8080;
-        if (arg_count == 1) {
+        if (arg_count >= 1) {
             port = to_int(args[0]);
         } else {
             const char *configured_port = getenv("PORT");
@@ -534,11 +561,15 @@ Value call_extended_builtin(const char *name, Value *args, int arg_count) {
                 return make_int(1);
             }
         }
+        if (nac_cfg.flags_set & NAC_OPT_PORT) port = nac_cfg.port;
         if (port < 1 || port > 65535) {
             report_error("serve(): port must be from 1 to 65535");
             return make_int(1);
         }
-        return make_int(server_start(port, ""));
+
+        const char *host = nac_cfg.host;
+        if (arg_count == 2 && !(nac_cfg.flags_set & NAC_OPT_HOST)) host = args[1].str_val;
+        return make_int(server_start(port, host, ""));
     }
 
     if (strcmp(name, "static") == 0) {
@@ -617,6 +648,31 @@ Value call_extended_builtin(const char *name, Value *args, int arg_count) {
         Value hdr = make_map();
         map_set(&hdr, args[0].str_val, make_string(args[1].str_val));
         return hdr;
+    }
+
+    if (strcmp(name, "setHeader") == 0) {
+        /* setHeader(name, value) or setHeader(map): adds response headers for
+         * the current request (usable in before, route and after). */
+        if (arg_count == 2 && args[0].type == TYPE_STRING && args[1].type == TYPE_STRING) {
+            if (nac_header_set(args[0].str_val, args[1].str_val) != 0) {
+                report_error("setHeader(): invalid header name or value, or too many headers");
+                return make_int(1);
+            }
+            return make_int(0);
+        }
+        if (arg_count == 1 && args[0].type == TYPE_MAP) {
+            for (int i = 0; i < args[0].map_val.size; i++) {
+                char value[MAX_STRING_LEN];
+                value_to_display_string(args[0].map_val.values[i], value, sizeof(value));
+                if (nac_header_set(args[0].map_val.keys[i], value) != 0) {
+                    report_error("setHeader(): invalid header name or value, or too many headers");
+                    return make_int(1);
+                }
+            }
+            return make_int(0);
+        }
+        report_error("setHeader() requires (name, value) strings or one map of headers");
+        return make_int(1);
     }
 
     if (strcmp(name, "cors") == 0) {

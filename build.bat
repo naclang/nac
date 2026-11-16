@@ -14,6 +14,19 @@ if "%SOURCES%"=="" (
     exit /b 1
 )
 
+:: SQLite (istege bagli): sqlite.org'dan indirilen "amalgamation" icindeki
+:: sqlite3.c ve sqlite3.h dosyalarini third_party\sqlite\ klasorune koyarsan
+:: dbOpen()/dbQuery()/... calisir. Yoksa bu fonksiyonlar hata mesaji verir.
+set "SQLITE_MSVC="
+set "SQLITE_GCC="
+if exist "third_party\sqlite\sqlite3.c" (
+    set "SQLITE_MSVC=/DNAC_WITH_SQLITE /Ithird_party\sqlite third_party\sqlite\sqlite3.c"
+    set "SQLITE_GCC=-DNAC_WITH_SQLITE -Ithird_party/sqlite third_party/sqlite/sqlite3.c"
+    echo [INFO] SQLite support: enabled, using third_party\sqlite\sqlite3.c
+) else (
+    echo [WARN] third_party\sqlite\sqlite3.c not found: building WITHOUT SQLite support, see README.
+)
+
 :: 1. Adim: Ortamda halihazirda cl.exe var mi kontrol et
 where cl.exe >nul 2>nul
 if %ERRORLEVEL% EQU 0 goto :BUILD_MSVC
@@ -44,12 +57,12 @@ exit /b 1
 :BUILD_MSVC
 echo [INFO] Compiler selected: MSVC (cl.exe)
 if not exist build mkdir build
-cl.exe /nologo /W3 /O2 /I"src" /Fo"build\\" %SOURCES% /Fe:nac.exe /link winhttp.lib ws2_32.lib bcrypt.lib /STACK:134217728
+cl.exe /nologo /W3 /O2 /I"src" /Fo"build\\" %SOURCES% %SQLITE_MSVC% /Fe:nac.exe /link winhttp.lib ws2_32.lib bcrypt.lib /STACK:134217728
 goto :CHECK_RESULT
 
 :BUILD_GCC
 echo [INFO] Compiler selected: GCC
-gcc %SOURCES% -Isrc -o nac.exe -lwinhttp -lws2_32 -lbcrypt -lm -Wl,--stack,134217728
+gcc %SOURCES% %SQLITE_GCC% -Isrc -o nac.exe -lwinhttp -lws2_32 -lbcrypt -lm -Wl,--stack,134217728
 goto :CHECK_RESULT
 
 :CHECK_RESULT

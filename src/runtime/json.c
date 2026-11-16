@@ -1,6 +1,8 @@
 #include "json.h"
 
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,13 +54,14 @@ static void skip_ws(const char **p) {
     }
 }
 
-static int parse_json_string(const char **p, char *out, size_t out_size) {
+static char *parse_json_string_alloc(const char **p) {
     if (**p != '"') {
-        return 0;
+        return NULL;
     }
 
     (*p)++;
-    size_t idx = 0;
+    StrBuilder sb;
+    sb_init(&sb);
 
     while (**p && **p != '"') {
         char c = **p;
@@ -66,7 +69,8 @@ static int parse_json_string(const char **p, char *out, size_t out_size) {
 
         if (c == '\\') {
             if (!**p) {
-                return 0;
+                free(sb.data);
+                return NULL;
             }
 
             char esc = **p;
@@ -81,23 +85,49 @@ static int parse_json_string(const char **p, char *out, size_t out_size) {
                 case 'n': c = '\n'; break;
                 case 'r': c = '\r'; break;
                 case 't': c = '\t'; break;
+                case 'u': {
+                    /* Minimal \uXXXX handling: decode BMP codepoint to UTF-8. */
+                    unsigned code = 0;
+                    int ok = 1;
+                    for (int i = 0; i < 4; i++) {
+                        char h = (*p)[i];
+                        if (!h) { ok = 0; break; }
+                        code <<= 4;
+                        if (h >= '0' && h <= '9') code |= (unsigned)(h - '0');
+                        else if (h >= 'a' && h <= 'f') code |= (unsigned)(10 + h - 'a');
+                        else if (h >= 'A' && h <= 'F') code |= (unsigned)(10 + h - 'A');
+                        else { ok = 0; break; }
+                    }
+                    if (!ok) { free(sb.data); return NULL; }
+                    (*p) += 4;
+                    if (code <= 0x7F) {
+                        sb_append_char(&sb, (char)code);
+                    } else if (code <= 0x7FF) {
+                        sb_append_char(&sb, (char)(0xC0 | (code >> 6)));
+                        sb_append_char(&sb, (char)(0x80 | (code & 0x3F)));
+                    } else {
+                        sb_append_char(&sb, (char)(0xE0 | (code >> 12)));
+                        sb_append_char(&sb, (char)(0x80 | ((code >> 6) & 0x3F)));
+                        sb_append_char(&sb, (char)(0x80 | (code & 0x3F)));
+                    }
+                    continue;
+                }
                 default:
-                    return 0;
+                    free(sb.data);
+                    return NULL;
             }
         }
 
-        if (idx + 1 < out_size) {
-            out[idx++] = c;
-        }
+        sb_append_char(&sb, c);
     }
 
     if (**p != '"') {
-        return 0;
+        free(sb.data);
+        return NULL;
     }
 
     (*p)++;
-    out[idx] = '\0';
-    return 1;
+    return sb.data;
 }
 
 static int parse_json_number(const char **p, Value *out) {
@@ -154,7 +184,15 @@ static int parse_json_number(const char **p, Value *out) {
     if (is_float) {
         *out = make_float(strtod(tmp, NULL));
     } else {
-        *out = make_int((int)strtol(tmp, NULL, 10));
+        /* NaC ints are 32-bit: integers outside that range (e.g. a JWT
+         * "exp" in the year 2100) become floats instead of wrapping. */
+        errno = 0;
+        long long whole = strtoll(tmp, NULL, 10);
+        if (errno == ERANGE || whole > INT_MAX || whole < INT_MIN) {
+            *out = make_float(strtod(tmp, NULL));
+        } else {
+            *out = make_int((int)whole);
+        }
     }
 
     return 1;
@@ -242,14 +280,15 @@ static int parse_object(const char **p, Value *out, int depth) {
     }
 
     while (**p) {
-        char key[MAX_STRING_LEN];
-        if (!parse_json_string(p, key, sizeof(key))) {
+        char *key = parse_json_string_alloc(p);
+        if (!key) {
             free_value(&obj);
             return 0;
         }
 
         skip_ws(p);
         if (**p != ':') {
+            free(key);
             free_value(&obj);
             return 0;
         }
@@ -259,12 +298,14 @@ static int parse_object(const char **p, Value *out, int depth) {
 
         Value val;
         if (!parse_value(p, &val, depth + 1)) {
+            free(key);
             free_value(&obj);
             return 0;
         }
 
         map_set(&obj, key, val);
         free_value(&val);
+        free(key);
 
         skip_ws(p);
 
@@ -295,11 +336,11 @@ static int parse_value(const char **p, Value *out, int depth) {
     skip_ws(p);
 
     if (**p == '"') {
-        char s[MAX_STRING_LEN];
-        if (!parse_json_string(p, s, sizeof(s))) {
+        char *s = parse_json_string_alloc(p);
+        if (!s) {
             return 0;
         }
-        *out = make_string(s);
+        *out = make_string_take(s);
         return 1;
     }
 
@@ -401,7 +442,7 @@ static void stringify_value(StrBuilder *sb, Value value) {
             break;
 
         case TYPE_FLOAT:
-            snprintf(num, sizeof(num), "%g", value.float_val);
+            nac_format_double(value.float_val, num, sizeof(num));
             sb_append_str(sb, num);
             break;
 

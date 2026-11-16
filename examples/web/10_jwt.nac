@@ -1,0 +1,51 @@
+// examples/web/10_jwt.nac -- JWT login, a protected route and a health check
+//
+// Run:  ./nac --health examples/web/10_jwt.nac
+// Try:
+//   curl -s -X POST http://localhost:8080/login -d '{"username":"ada","password":"lovelace"}'
+//   curl -s http://localhost:8080/me -H "Authorization: Bearer <token from /login>"
+//   curl -s http://localhost:8080/health
+//
+// Tokens are HS256 and stateless: the server stores nothing. Set JWT_SECRET
+// to a long random value (for example the output of `randomBytes(32)`) in
+// .env or the environment; the fallback below is for this demo only.
+
+SECRET = env("JWT_SECRET", "demo-only-change-me-0123456789abcdef")
+TTL = 3600                                   // token lifetime in seconds
+
+fn bearerToken(headers) {
+    value = headers["authorization"]
+    if isNull(value) or not contains(value, "Bearer ") {
+        return null
+    }
+    return replace(value, "Bearer ", "")
+}
+
+route POST "/login" {
+    try {
+        data = jsonParse(body)
+    } catch e {
+        return json({ error: "invalid JSON" }, 400)
+    }
+    // Demo credentials. A real app looks the user up and uses passwordVerify().
+    if data.username != "ada" or data.password != "lovelace" {
+        return json({ error: "invalid credentials" }, 401)
+    }
+    issued = now()
+    token = jwtSign({ sub: data.username, iat: issued, exp: issued + TTL }, SECRET)
+    return json({ token: token, expiresAt: formatTime(issued + TTL) })
+}
+
+route GET "/me" {
+    token = bearerToken(headers)
+    claims = null
+    if not isNull(token) {
+        claims = jwtVerify(token, SECRET)     // null: bad signature, expired, malformed
+    }
+    if isNull(claims) {
+        return json({ error: "unauthorized" }, 401)
+    }
+    return json({ user: claims.sub, issuedAt: formatTime(claims.iat), expiresAt: formatTime(claims.exp) })
+}
+
+serve()

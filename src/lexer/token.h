@@ -65,12 +65,10 @@ typedef struct {
     int line;
     int col;
     int nl_before; /* 1 if a newline separates this token from the previous one */
-    union {
-        int int_val;
-        double float_val;
-        char str_val[MAX_STRING_LEN];
-        char ident[MAX_TOKEN_LEN];
-    };
+    int int_val;
+    double float_val;
+    char *str_val;              /* heap-allocated for TOK_STRING; NULL otherwise */
+    char ident[MAX_TOKEN_LEN];
 } Token;
 
 #endif

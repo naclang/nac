@@ -1,0 +1,43 @@
+// examples/web/11_middleware.nac -- before / after bloklari (middleware)
+//
+// Calistir:  ./nac examples/web/11_middleware.nac
+// Dene:      curl -i http://localhost:8080/
+//            curl -i http://localhost:8080/admin/stats
+//            curl -i -H "Authorization: Bearer gizli" http://localhost:8080/admin/stats
+//            curl -i -X OPTIONS http://localhost:8080/anything     (CORS preflight)
+
+requestCount = 0
+currentUser = null
+
+// Her istekten once calisir (404'ler ve OPTIONS dahil). Bir deger `return`
+// ederse istek orada biter; hicbir sey donmezse siradaki blok ya da route calisir.
+before {
+    requestCount = requestCount + 1
+    if method == "OPTIONS" {
+        return { status: 204, body: "" }
+    }
+}
+
+// Sadece /admin ve altindaki yollar icin: basit bir yetki kontrolu.
+before "/admin/*" {
+    if (headers.authorization or "") != "Bearer gizli" {
+        return json({ error: "yetkisiz" }, 401)
+    }
+    currentUser = "admin"          // route'ta da gorunur
+}
+
+// Her yanit icin: CORS basliklari + kayit. `response` = { status, body, headers }.
+after {
+    setHeader(cors("*", "GET, POST, OPTIONS", "Content-Type, Authorization"))
+    print(`${method} ${path} -> ${response.status}`)
+}
+
+route GET "/" {
+    return `Merhaba! Bu ${requestCount}. istek.`
+}
+
+route GET "/admin/stats" {
+    return json({ user: currentUser, requests: requestCount })
+}
+
+serve(8080)

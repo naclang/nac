@@ -5,13 +5,52 @@
 #include <string.h>
 
 #include "../builtin/builtin.h"
+#include "../builtin/db_builtin.h"
 #include "../builtin/extended_builtin.h"
 #include "../builtin/security_builtin.h"
+#include "../builtin/time_builtin.h"
 #include "../core/interpreter.h"
 #include "../net/http.h"
 #include "../parser/parser.h"
 #include "../util/error.h"
 #include "vartable.h"
+
+/* Marks `v` as a borrowed view: free_value() must not release storage that
+ * belongs to a variable or container. */
+static Value borrow_value(Value v) {
+    v.owned = 0;
+    return v;
+}
+
+/* Moves an owned temporary into a container slot, deep-copying borrowed
+ * views so the slot never aliases another container. */
+static Value take_or_copy(Value v) {
+    if (v.owned) return v;
+    return copy_value(v);
+}
+
+static void free_value_args(Value *args, int count) {
+    for (int i = 0; i < count; i++) {
+        free_value(&args[i]);
+    }
+}
+
+static char *display_dup(Value v) {
+    if (v.type == TYPE_STRING) {
+        const char *s = v.str_val ? v.str_val : "";
+        size_t len = strlen(s);
+        char *copy = (char*)malloc(len + 1);
+        if (copy) memcpy(copy, s, len + 1);
+        return copy;
+    }
+
+    char tmp[256];
+    value_to_display_string(v, tmp, sizeof(tmp));
+    size_t len = strlen(tmp);
+    char *copy = (char*)malloc(len + 1);
+    if (copy) memcpy(copy, tmp, len + 1);
+    return copy;
+}
 
 static int key_from_value(Value key_val, char *buffer, size_t buffer_size) {
     if (key_val.type == TYPE_STRING) {
@@ -26,7 +65,7 @@ static int key_from_value(Value key_val, char *buffer, size_t buffer_size) {
     }
 
     if (key_val.type == TYPE_FLOAT) {
-        snprintf(buffer, buffer_size, "%g", key_val.float_val);
+        nac_format_double(key_val.float_val, buffer, buffer_size);
         return 1;
     }
 
@@ -73,9 +112,12 @@ int call_nac_function(const char *name, Value *args, int arg_count, Value *out_r
     bool prev_should_return = should_return;
     should_return = false;
 
+    free_value(&return_value);
+    return_value = make_null();
     eval_node(func->body);
 
     Value result = return_value;
+    return_value = make_null();
     should_return = prev_should_return;
 
     call_depth--;
@@ -113,11 +155,13 @@ int call_func_value(Value fn, Value *args, int arg_count, Value *out_result) {
 
     bool prev_should_return = should_return;
     should_return = false;
+    free_value(&return_value);
     return_value = make_null();   /* a callback without `return` yields null */
 
     eval_node(func->body);
 
     Value result = return_value;
+    return_value = make_null();
     should_return = prev_should_return;
 
     call_depth--;
@@ -134,25 +178,31 @@ static Value apply_arith_op(NaCTokenType op, Value left, Value right) {
     switch (op) {
         case TOK_PLUS:
             if (left.type == TYPE_STRING || right.type == TYPE_STRING) {
-                char result[MAX_STRING_LEN];
                 /* Non-string operands are rendered like print() would show
                  * them (true/false/null, arrays, maps), not as raw numbers. */
-                if (left.type == TYPE_STRING) {
-                    strncpy(result, left.str_val, MAX_STRING_LEN - 1);
-                    result[MAX_STRING_LEN - 1] = '\0';
-                } else {
-                    value_to_display_string(left, result, MAX_STRING_LEN);
+                char *left_s = display_dup(left);
+                char *right_s = display_dup(right);
+                if (!left_s || !right_s) {
+                    free(left_s);
+                    free(right_s);
+                    report_error("Out of memory concatenating strings");
+                    return make_string("");
                 }
 
-                int len = strlen(result);
-                if (right.type == TYPE_STRING) {
-                    strncat(result, right.str_val, MAX_STRING_LEN - len - 1);
-                } else {
-                    char temp[2048];
-                    value_to_display_string(right, temp, sizeof(temp));
-                    strncat(result, temp, MAX_STRING_LEN - len - 1);
+                size_t left_len = strlen(left_s);
+                size_t right_len = strlen(right_s);
+                char *result = (char*)malloc(left_len + right_len + 1);
+                if (!result) {
+                    free(left_s);
+                    free(right_s);
+                    report_error("Out of memory concatenating strings");
+                    return make_string("");
                 }
-                return make_string(result);
+                memcpy(result, left_s, left_len);
+                memcpy(result + left_len, right_s, right_len + 1);
+                free(left_s);
+                free(right_s);
+                return make_string_take(result);
             }
             if (left.type == TYPE_FLOAT || right.type == TYPE_FLOAT) {
                 return make_float(to_float(left) + to_float(right));
@@ -207,9 +257,14 @@ static Value *lvalue_ptr(ASTNode *n) {
         Value *base = lvalue_ptr(n->index.object);
         if (!base) return NULL;
         Value idx_val = eval_node(n->index.index);
+        if (error_pending) {
+            free_value(&idx_val);
+            return NULL;
+        }
 
         if (base->type == TYPE_ARRAY) {
             int idx = to_int(idx_val);
+            free_value(&idx_val);
             if (idx < 0 || idx >= base->array_val.size) {
                 report_error("Array index out of bounds");
                 return NULL;
@@ -218,9 +273,12 @@ static Value *lvalue_ptr(ASTNode *n) {
         }
         if (base->type == TYPE_MAP) {
             char key[1024];
-            if (!key_from_value(idx_val, key, sizeof(key))) return NULL;
+            int ok = key_from_value(idx_val, key, sizeof(key));
+            free_value(&idx_val);
+            if (!ok) return NULL;
             return map_get(base, key);
         }
+        free_value(&idx_val);
     }
     return NULL;
 }
@@ -256,7 +314,7 @@ Value eval_node(ASTNode *node) {
                 report_error(msg);
                 return make_null();
             }
-            return *v;
+            return borrow_value(*v);
         }
 
         case AST_BINARY_OP: {
@@ -267,98 +325,126 @@ Value eval_node(ASTNode *node) {
             if (node->binary.op == TOK_OR && to_bool(left)) return left;
 
             Value right = eval_node(node->binary.right);
+            Value result;
 
             switch (node->binary.op) {
                 case TOK_PLUS:
                 case TOK_MINUS:
                 case TOK_STAR:
                 case TOK_SLASH:
-                    return apply_arith_op(node->binary.op, left, right);
+                    result = apply_arith_op(node->binary.op, left, right);
+                    break;
 
                 case TOK_PERCENT:
                     if (to_int(right) == 0) {
                         report_error("Modulo by zero");
-                        return make_int(0);
+                        result = make_int(0);
+                    } else {
+                        result = make_int(to_int(left) % to_int(right));
                     }
-                    return make_int(to_int(left) % to_int(right));
+                    break;
 
                 case TOK_EQ:
                     if (left.type == TYPE_NULL || right.type == TYPE_NULL) {
-                        return make_bool(left.type == TYPE_NULL && right.type == TYPE_NULL);
+                        result = make_bool(left.type == TYPE_NULL && right.type == TYPE_NULL);
+                    } else if (left.type == TYPE_STRING && right.type == TYPE_STRING) {
+                        result = make_bool(strcmp(left.str_val, right.str_val) == 0);
+                    } else {
+                        result = make_bool(to_float(left) == to_float(right));
                     }
-                    if (left.type == TYPE_STRING && right.type == TYPE_STRING) {
-                        return make_bool(strcmp(left.str_val, right.str_val) == 0);
-                    }
-                    return make_bool(to_float(left) == to_float(right));
+                    break;
                 case TOK_NEQ:
                     if (left.type == TYPE_NULL || right.type == TYPE_NULL) {
-                        return make_bool(!(left.type == TYPE_NULL && right.type == TYPE_NULL));
+                        result = make_bool(!(left.type == TYPE_NULL && right.type == TYPE_NULL));
+                    } else if (left.type == TYPE_STRING && right.type == TYPE_STRING) {
+                        result = make_bool(strcmp(left.str_val, right.str_val) != 0);
+                    } else {
+                        result = make_bool(to_float(left) != to_float(right));
                     }
-                    if (left.type == TYPE_STRING && right.type == TYPE_STRING) {
-                        return make_bool(strcmp(left.str_val, right.str_val) != 0);
-                    }
-                    return make_bool(to_float(left) != to_float(right));
+                    break;
                 case TOK_LT:
                     if (left.type == TYPE_STRING && right.type == TYPE_STRING) {
-                        return make_bool(strcmp(left.str_val, right.str_val) < 0);
+                        result = make_bool(strcmp(left.str_val, right.str_val) < 0);
+                    } else {
+                        result = make_bool(to_float(left) < to_float(right));
                     }
-                    return make_bool(to_float(left) < to_float(right));
+                    break;
                 case TOK_GT:
                     if (left.type == TYPE_STRING && right.type == TYPE_STRING) {
-                        return make_bool(strcmp(left.str_val, right.str_val) > 0);
+                        result = make_bool(strcmp(left.str_val, right.str_val) > 0);
+                    } else {
+                        result = make_bool(to_float(left) > to_float(right));
                     }
-                    return make_bool(to_float(left) > to_float(right));
+                    break;
                 case TOK_LTE:
                     if (left.type == TYPE_STRING && right.type == TYPE_STRING) {
-                        return make_bool(strcmp(left.str_val, right.str_val) <= 0);
+                        result = make_bool(strcmp(left.str_val, right.str_val) <= 0);
+                    } else {
+                        result = make_bool(to_float(left) <= to_float(right));
                     }
-                    return make_bool(to_float(left) <= to_float(right));
+                    break;
                 case TOK_GTE:
                     if (left.type == TYPE_STRING && right.type == TYPE_STRING) {
-                        return make_bool(strcmp(left.str_val, right.str_val) >= 0);
+                        result = make_bool(strcmp(left.str_val, right.str_val) >= 0);
+                    } else {
+                        result = make_bool(to_float(left) >= to_float(right));
                     }
-                    return make_bool(to_float(left) >= to_float(right));
+                    break;
                 case TOK_IN: {
+                    result = make_bool(0);
                     if (right.type == TYPE_ARRAY) {
                         for (int i = 0; i < right.array_val.size; i++) {
-                            if (values_equal(left, right.array_val.elements[i])) return make_bool(1);
+                            if (values_equal(left, right.array_val.elements[i])) {
+                                result = make_bool(1);
+                                break;
+                            }
                         }
-                        return make_bool(0);
-                    }
-                    if (right.type == TYPE_MAP) {
+                    } else if (right.type == TYPE_MAP) {
                         char key[1024];
-                        if (!key_from_value(left, key, sizeof(key))) return make_bool(0);
-                        return make_bool(map_get(&right, key) != NULL);
+                        if (key_from_value(left, key, sizeof(key))) {
+                            result = make_bool(map_get(&right, key) != NULL);
+                        }
+                    } else if (right.type == TYPE_STRING && left.type == TYPE_STRING) {
+                        result = make_bool(strstr(right.str_val, left.str_val) != NULL);
+                    } else {
+                        report_error("'in' needs an array, map or string on the right");
                     }
-                    if (right.type == TYPE_STRING && left.type == TYPE_STRING) {
-                        return make_bool(strstr(right.str_val, left.str_val) != NULL);
-                    }
-                    report_error("'in' needs an array, map or string on the right");
-                    return make_bool(0);
+                    break;
                 }
                 case TOK_AND:   /* left was truthy -> result is the right operand */
                 case TOK_OR:    /* left was falsy  -> result is the right operand */
+                    free_value(&left);
                     return right;
 
                 default:
                     report_error("Unknown binary operator");
-                    return make_int(0);
+                    result = make_int(0);
+                    break;
             }
+
+            free_value(&left);
+            free_value(&right);
+            return result;
         }
 
         case AST_UNARY_OP: {
             Value operand = eval_node(node->unary.operand);
+            Value result;
             switch (node->unary.op) {
                 case TOK_MINUS:
-                    if (operand.type == TYPE_FLOAT) {
-                        return make_float(-operand.float_val);
-                    }
-                    return make_int(-to_int(operand));
+                    result = (operand.type == TYPE_FLOAT)
+                                 ? make_float(-operand.float_val)
+                                 : make_int(-to_int(operand));
+                    break;
                 case TOK_NOT:
-                    return make_bool(!to_bool(operand));
+                    result = make_bool(!to_bool(operand));
+                    break;
                 default:
-                    return make_int(0);
+                    result = make_int(0);
+                    break;
             }
+            free_value(&operand);
+            return result;
         }
 
         case AST_ASSIGN: {
@@ -370,18 +456,21 @@ Value eval_node(ASTNode *node) {
                     char msg[256];
                     snprintf(msg, sizeof(msg), "Undefined variable: %s", node->assign.var_name);
                     report_error(msg);
+                    free_value(&val);
                     return make_null();
                 }
-                val = apply_arith_op(node->assign.compound_op, *current, val);
+                Value combined = apply_arith_op(node->assign.compound_op, *current, val);
+                free_value(&val);
+                val = combined;
             }
 
-            if (error_pending) return make_null();   /* failed inside try: leave the variable alone */
-
-            /* a = a[0]  /  a = a.child: deep-copy first so freeing the old
-             * value of `a` can't invalidate what we're about to store. */
-            if (val.type == TYPE_ARRAY || val.type == TYPE_MAP) {
-                val = copy_value(val);
+            if (error_pending) {   /* failed inside try: leave the variable alone */
+                free_value(&val);
+                return make_null();
             }
+
+            /* set_var() copies before releasing the old value, so
+             * `a = a[0]` / `a = a.child` stays safe without an extra copy. */
             set_var(node->assign.var_name, val);
             return val;
         }
@@ -400,7 +489,9 @@ Value eval_node(ASTNode *node) {
                 error_pending = false;
                 caught_error[0] = '\0';
                 if (node->try_stmt.var_name[0]) {
-                    set_var(node->try_stmt.var_name, make_string(message));
+                    Value caught = make_string(message);
+                    set_var(node->try_stmt.var_name, caught);
+                    free_value(&caught);
                 }
                 eval_node(node->try_stmt.catch_block);
             }
@@ -409,9 +500,10 @@ Value eval_node(ASTNode *node) {
 
         case AST_THROW: {
             Value v = eval_node(node->throw_stmt.value);
-            if (error_pending) return make_int(0);
+            if (error_pending) { free_value(&v); return make_int(0); }
             char message[512];
             value_to_display_string(v, message, sizeof(message));
+            free_value(&v);
             if (try_depth > 0) {
                 report_error(message);        /* captured by the enclosing try */
             } else {
@@ -447,10 +539,18 @@ Value eval_node(ASTNode *node) {
                 }
             }
 
-            Value *arg_values = (Value*)malloc(sizeof(Value) * node->call.arg_count);
+            Value *arg_values = NULL;
+            if (node->call.arg_count > 0) {
+                arg_values = (Value*)calloc((size_t)node->call.arg_count, sizeof(Value));
+                if (!arg_values) {
+                    report_error("Out of memory");
+                    return make_null();
+                }
+            }
 
             bool is_mutating_array_call =
-                (strcmp(node->call.func_name, "push") == 0 || strcmp(node->call.func_name, "pop") == 0) &&
+                (strcmp(node->call.func_name, "push") == 0 || strcmp(node->call.func_name, "pop") == 0 ||
+                 strcmp(node->call.func_name, "removeAt") == 0 || strcmp(node->call.func_name, "delete") == 0) &&
                 node->call.arg_count > 0 && node->call.args[0]->type == AST_VARIABLE;
 
             for (int i = 0; i < node->call.arg_count; i++) {
@@ -459,13 +559,15 @@ Value eval_node(ASTNode *node) {
                      * they must operate on an independent copy rather than
                      * the pointer shared with the stored variable. */
                     Value *src = get_var(node->call.args[0]->var_name);
-                    arg_values[0] = src ? copy_value(*src) : make_int(0);
+                    arg_values[0] = src ? copy_value(*src) : make_null();
                 } else {
                     arg_values[i] = eval_node(node->call.args[i]);
                 }
+                if (error_pending) break;
             }
 
             if (error_pending) {      /* an argument failed inside try: don't run the call */
+                free_value_args(arg_values, node->call.arg_count);
                 free(arg_values);
                 return make_null();
             }
@@ -476,20 +578,38 @@ Value eval_node(ASTNode *node) {
                 if (is_mutating_array_call) {
                     set_var(node->call.args[0]->var_name, arg_values[0]);
                     free_value(&arg_values[0]);
+                    arg_values[0] = make_null();
                 }
 
+                free_value_args(arg_values, node->call.arg_count);
                 free(arg_values);
                 return result;
             }
 
             if (!via_variable && is_extended_builtin(node->call.func_name)) {
                 Value result = call_extended_builtin(node->call.func_name, arg_values, node->call.arg_count);
+                free_value_args(arg_values, node->call.arg_count);
                 free(arg_values);
                 return result;
             }
 
             if (!via_variable && is_security_builtin(node->call.func_name)) {
                 Value result = call_security_builtin(node->call.func_name, arg_values, node->call.arg_count);
+                free_value_args(arg_values, node->call.arg_count);
+                free(arg_values);
+                return result;
+            }
+
+            if (!via_variable && is_time_builtin(node->call.func_name)) {
+                Value result = call_time_builtin(node->call.func_name, arg_values, node->call.arg_count);
+                free_value_args(arg_values, node->call.arg_count);
+                free(arg_values);
+                return result;
+            }
+
+            if (!via_variable && is_db_builtin(node->call.func_name)) {
+                Value result = call_db_builtin(node->call.func_name, arg_values, node->call.arg_count);
+                free_value_args(arg_values, node->call.arg_count);
                 free(arg_values);
                 return result;
             }
@@ -500,19 +620,22 @@ Value eval_node(ASTNode *node) {
                 char msg[256];
                 snprintf(msg, sizeof(msg), "Undefined function: %s", node->call.func_name);
                 report_error(msg);
+                free_value_args(arg_values, node->call.arg_count);
                 free(arg_values);
                 return make_int(0);
             }
 
             if (node->call.arg_count != func->param_count) {
                 report_error("Argument count mismatch");
+                free_value_args(arg_values, node->call.arg_count);
                 free(arg_values);
                 return make_int(0);
             }
 
             if (call_depth >= MAX_CALL_DEPTH) {
-                free(arg_values);
                 report_error("Stack overflow");
+                free_value_args(arg_values, node->call.arg_count);
+                free(arg_values);
                 return make_int(0);
             }
 
@@ -522,12 +645,16 @@ Value eval_node(ASTNode *node) {
             for (int i = 0; i < func->param_count; i++) {
                 declare_local_var(func->params[i], arg_values[i]);
             }
+            free_value_args(arg_values, node->call.arg_count);
             free(arg_values);
 
+            free_value(&return_value);
+            return_value = make_null();
             should_return = false;
             eval_node(func->body);
 
             Value result = return_value;
+            return_value = make_null();
             should_return = false;
 
             call_depth--;
@@ -540,15 +667,20 @@ Value eval_node(ASTNode *node) {
         case AST_BLOCK: {
             for (int i = 0; i < node->block.count; i++) {
                 if (should_break || should_continue || should_return || error_pending) break;
-                eval_node(node->block.statements[i]);
+                Value stmt = eval_node(node->block.statements[i]);
+                /* A `return` hands its value over through return_value; every
+                 * other statement result is a temporary we can release. */
+                if (!should_return) free_value(&stmt);
             }
             return make_int(0);
         }
 
         case AST_IF: {
             Value condition = eval_node(node->if_stmt.condition);
+            int truthy = !error_pending && to_bool(condition);
+            free_value(&condition);
             if (error_pending) return make_int(0);
-            if (to_bool(condition)) {
+            if (truthy) {
                 eval_node(node->if_stmt.then_block);
             } else if (node->if_stmt.else_block) {
                 eval_node(node->if_stmt.else_block);
@@ -559,7 +691,9 @@ Value eval_node(ASTNode *node) {
         case AST_WHILE: {
             while (1) {
                 Value condition = eval_node(node->while_stmt.condition);
-                if (error_pending || !to_bool(condition)) break;
+                int truthy = !error_pending && to_bool(condition);
+                free_value(&condition);
+                if (error_pending || !truthy) break;
 
                 should_continue = false;
                 eval_node(node->while_stmt.body);
@@ -577,8 +711,13 @@ Value eval_node(ASTNode *node) {
 
         case AST_RETURN: {
             Value val = eval_node(node->return_stmt.value);
-            if (error_pending) return make_null();
+            if (error_pending) {
+                free_value(&val);
+                return make_null();
+            }
+            free_value(&return_value);
             return_value = copy_value(val);
+            free_value(&val);
             should_return = true;
             return return_value;
         }
@@ -593,8 +732,12 @@ Value eval_node(ASTNode *node) {
 
         case AST_OUT: {
             Value val = eval_node(node->out_stmt.value);
-            if (error_pending) return make_int(0);   /* an error inside try: don't print */
+            if (error_pending) {
+                free_value(&val);
+                return make_int(0);   /* an error inside try: don't print */
+            }
             print_value(val);
+            free_value(&val);
             return make_int(0);
         }
 
@@ -633,7 +776,8 @@ Value eval_node(ASTNode *node) {
         case AST_ARRAY_LITERAL: {
             Value arr = make_array(node->array_literal.count);
             for (int i = 0; i < node->array_literal.count; i++) {
-                arr.array_val.elements[i] = eval_node(node->array_literal.elements[i]);
+                Value item = eval_node(node->array_literal.elements[i]);
+                arr.array_val.elements[i] = take_or_copy(item);
             }
             return arr;
         }
@@ -643,12 +787,15 @@ Value eval_node(ASTNode *node) {
             for (int i = 0; i < node->map_literal.count; i++) {
                 Value k = eval_node(node->map_literal.keys[i]);
                 char key[1024];
-                if (!key_from_value(k, key, sizeof(key))) {
+                int key_ok = key_from_value(k, key, sizeof(key));
+                free_value(&k);
+                if (!key_ok) {
                     report_error("Map key must be int, float, string, or bool");
                     continue;
                 }
                 Value v = eval_node(node->map_literal.values[i]);
                 map_set(&m, key, v);
+                free_value(&v);
             }
             return m;
         }
@@ -656,58 +803,73 @@ Value eval_node(ASTNode *node) {
         case AST_INDEX: {
             Value base = eval_node(node->index.object);
             Value idx_val = eval_node(node->index.index);
+            Value result = make_null();
 
             if (base.type == TYPE_ARRAY) {
                 int idx = to_int(idx_val);
                 if (idx < 0 || idx >= base.array_val.size) {
                     report_error("Array index out of bounds");
-                    return make_null();
+                } else if (base.owned) {
+                    /* A temporary container (an array literal): hand the
+                     * element out and release the container. */
+                    result = copy_value(base.array_val.elements[idx]);
+                } else {
+                    result = borrow_value(base.array_val.elements[idx]);
                 }
-                return base.array_val.elements[idx];
-            }
-            if (base.type == TYPE_MAP) {
+            } else if (base.type == TYPE_MAP) {
                 char key[1024];
                 if (!key_from_value(idx_val, key, sizeof(key))) {
                     report_error("Map key must be int, float, string, or bool");
-                    return make_null();
+                } else {
+                    Value *found = map_get(&base, key);
+                    if (found) {
+                        result = base.owned ? copy_value(*found) : borrow_value(*found);
+                    }
                 }
-                Value *found = map_get(&base, key);
-                return found ? *found : make_null();
-            }
-            if (base.type == TYPE_STRING) {
+            } else if (base.type == TYPE_STRING) {
                 int idx = to_int(idx_val);
                 int len = (int)strlen(base.str_val);
                 if (idx < 0 || idx >= len) {
                     report_error("String index out of bounds");
-                    return make_null();
+                } else {
+                    char one[2] = { base.str_val[idx], '\0' };
+                    result = make_string(one);
                 }
-                char one[2] = { base.str_val[idx], '\0' };
-                return make_string(one);
+            } else {
+                report_error("Value is not indexable");
             }
-            report_error("Value is not indexable");
-            return make_null();
+
+            free_value(&idx_val);
+            free_value(&base);
+            return result;
         }
 
         case AST_INDEX_ASSIGN: {
             ASTNode *t = node->index_assign.target;
             Value val = eval_node(node->index_assign.value);
-            if (error_pending) return make_null();
+            if (error_pending) { free_value(&val); return make_null(); }
             Value *container = lvalue_ptr(t->index.object);
             if (!container) {
                 report_error("Cannot assign: the container is undefined or missing");
+                free_value(&val);
                 return make_null();
             }
             Value idx_val = eval_node(t->index.index);
+            if (error_pending) { free_value(&idx_val); free_value(&val); return make_null(); }
             NaCTokenType cop = node->index_assign.compound_op;
 
             if (container->type == TYPE_ARRAY) {
                 int idx = to_int(idx_val);
+                free_value(&idx_val);
                 if (idx < 0 || idx >= container->array_val.size) {
                     report_error("Array index out of bounds");
+                    free_value(&val);
                     return make_null();
                 }
                 if (cop != TOK_EOF) {
-                    val = apply_arith_op(cop, container->array_val.elements[idx], val);
+                    Value combined = apply_arith_op(cop, container->array_val.elements[idx], val);
+                    free_value(&val);
+                    val = combined;
                 }
                 Value stored = copy_value(val);
                 free_value(&container->array_val.elements[idx]);
@@ -716,24 +878,36 @@ Value eval_node(ASTNode *node) {
             }
             if (container->type == TYPE_MAP) {
                 char key[1024];
-                if (!key_from_value(idx_val, key, sizeof(key))) {
+                int key_ok = key_from_value(idx_val, key, sizeof(key));
+                free_value(&idx_val);
+                if (!key_ok) {
                     report_error("Map key must be int, float, string, or bool");
+                    free_value(&val);
                     return make_null();
                 }
                 if (cop != TOK_EOF) {
                     Value *current = map_get(container, key);
-                    Value base = current ? *current : make_null();
-                    val = apply_arith_op(cop, base, val);
+                    Value base = current ? borrow_value(*current) : make_null();
+                    Value combined = apply_arith_op(cop, base, val);
+                    free_value(&val);
+                    val = combined;
                 }
                 map_set(container, key, val);
-                return val;
+                free_value(&val);
+                return make_null();
             }
+            free_value(&idx_val);
+            free_value(&val);
             report_error("Value is not indexable");
             return make_null();
         }
 
         case AST_FOREACH: {
-            Value it = copy_value(eval_node(node->foreach_stmt.iterable));
+            Value iter_src = eval_node(node->foreach_stmt.iterable);
+            if (error_pending) { free_value(&iter_src); return make_int(0); }
+            Value it = copy_value(iter_src);
+            free_value(&iter_src);
+
             int n = 0;
             if (it.type == TYPE_ARRAY) n = it.array_val.size;
             else if (it.type == TYPE_MAP) n = it.map_val.size;

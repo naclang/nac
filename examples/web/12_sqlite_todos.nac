@@ -1,0 +1,65 @@
+// examples/web/12_sqlite_todos.nac -- SQLite ile kalici todo API'si
+//
+// 02_json_api.nac ile ayni API, ama veri bellekte degil todos.db dosyasinda:
+// sunucuyu yeniden baslatinca kayitlar kaybolmaz.
+// (SQLite destekli bir NaC derlemesi gerekir, bkz. README.)
+//
+// Calistir:  ./nac examples/web/12_sqlite_todos.nac
+// Dene:
+//   curl -X POST -d '{"title":"sut al"}' http://localhost:8080/todos
+//   curl http://localhost:8080/todos
+//   curl "http://localhost:8080/todos?done=true"
+//   curl -X PATCH http://localhost:8080/todos/1/done
+//   curl -X DELETE http://localhost:8080/todos/1
+//   curl -X POST -d 'bozuk' http://localhost:8080/todos      (400 doner)
+//
+// Degerleri SQL metnine yapistirma: her zaman "?" ile (ya da :ad ile) ver.
+
+db = dbOpen(env("TODO_DB", "todos.db"))
+dbExec(db, "CREATE TABLE IF NOT EXISTS todos (
+    id    INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    done  INTEGER NOT NULL DEFAULT 0
+)")
+
+route GET "/todos" {
+    if "done" in query {
+        wanted = 0
+        if query.done == "true" { wanted = 1 }
+        return json(dbQuery(db, "SELECT id, title, done FROM todos WHERE done = ? ORDER BY id", [wanted]))
+    }
+    return json(dbQuery(db, "SELECT id, title, done FROM todos ORDER BY id"))
+}
+
+route GET "/todos/:id" {
+    todo = dbGet(db, "SELECT id, title, done FROM todos WHERE id = ?", [toInt(params.id)])
+    if isNull(todo) { return json({ error: "bulunamadi" }, 404) }
+    return json(todo)
+}
+
+route POST "/todos" {
+    try {
+        data = jsonParse(body)
+    } catch e {
+        return json({ error: "gecersiz JSON" }, 400)
+    }
+    if type(data) != "map" or not ("title" in data) {
+        return json({ error: "title gerekli" }, 400)
+    }
+    result = dbExec(db, "INSERT INTO todos (title) VALUES (:title)", { title: data.title })
+    return json(dbGet(db, "SELECT id, title, done FROM todos WHERE id = ?", [result.lastId]), 201)
+}
+
+route PATCH "/todos/:id/done" {
+    result = dbExec(db, "UPDATE todos SET done = 1 WHERE id = ?", [toInt(params.id)])
+    if result.changes == 0 { return json({ error: "bulunamadi" }, 404) }
+    return json(dbGet(db, "SELECT id, title, done FROM todos WHERE id = ?", [toInt(params.id)]))
+}
+
+route DELETE "/todos/:id" {
+    result = dbExec(db, "DELETE FROM todos WHERE id = ?", [toInt(params.id)])
+    if result.changes == 0 { return json({ error: "bulunamadi" }, 404) }
+    return json({ deleted: toInt(params.id) })
+}
+
+serve(8080)

@@ -21,7 +21,7 @@ void value_to_display_string(Value v, char *out, size_t out_size) {
             snprintf(out, out_size, "%d", v.int_val);
             break;
         case TYPE_FLOAT:
-            snprintf(out, out_size, "%g", v.float_val);
+            nac_format_double(v.float_val, out, out_size);
             break;
         case TYPE_STRING:
             snprintf(out, out_size, "%s", v.str_val);
@@ -50,7 +50,7 @@ void value_to_display_string(Value v, char *out, size_t out_size) {
 bool is_builtin_function(const char *name) {
     const char *builtins[] = {
         "sqrt", "pow", "sin", "cos", "tan", "abs", "floor", "ceil", "round", "log", "exp",
-        "length", "upper", "lower", "push", "pop",
+        "length", "upper", "lower", "push", "pop", "removeAt", "delete",
         "trim", "replace", "substr", "indexOf",
         "first", "last", "reverse", "slice", "join", "split", "contains", "has",
         "read", "write", "append", "map",
@@ -472,7 +472,7 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             if (elem.type == TYPE_INT) {
                 snprintf(elem_str, sizeof(elem_str), "%d", elem.int_val);
             } else if (elem.type == TYPE_FLOAT) {
-                snprintf(elem_str, sizeof(elem_str), "%g", elem.float_val);
+                nac_format_double(elem.float_val, elem_str, sizeof(elem_str));
             } else if (elem.type == TYPE_STRING) {
                 strncpy(elem_str, elem.str_val, sizeof(elem_str) - 1);
             } else {
@@ -778,7 +778,7 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             if (args[1].type == TYPE_INT) {
                 snprintf(temp_str, sizeof(temp_str), "%d", args[1].int_val);
             } else if (args[1].type == TYPE_FLOAT) {
-                snprintf(temp_str, sizeof(temp_str), "%g", args[1].float_val);
+                nac_format_double(args[1].float_val, temp_str, sizeof(temp_str));
             }
             content = temp_str;
         }
@@ -817,7 +817,7 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             if (args[1].type == TYPE_INT) {
                 snprintf(temp_str, sizeof(temp_str), "%d", args[1].int_val);
             } else if (args[1].type == TYPE_FLOAT) {
-                snprintf(temp_str, sizeof(temp_str), "%g", args[1].float_val);
+                nac_format_double(args[1].float_val, temp_str, sizeof(temp_str));
             }
             content = temp_str;
         }
@@ -872,6 +872,48 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
         free_value(&args[0].array_val.elements[last_idx]);
         args[0].array_val.size--;
         return last;
+    }
+
+    if (strcmp(name, "removeAt") == 0) {
+        if (arg_count != 2 || args[0].type != TYPE_ARRAY || args[1].type != TYPE_INT) {
+            report_error("removeAt() requires an array and an integer index");
+            return make_null();
+        }
+        int size = args[0].array_val.size;
+        int idx = args[1].int_val;
+        if (idx < 0 || idx >= size) {
+            char msg[128];
+            snprintf(msg, sizeof(msg), "removeAt() index %d out of range (array length %d)", idx, size);
+            report_error(msg);
+            return make_null();
+        }
+        Value removed = copy_value(args[0].array_val.elements[idx]);
+        free_value(&args[0].array_val.elements[idx]);
+        memmove(&args[0].array_val.elements[idx], &args[0].array_val.elements[idx + 1],
+                sizeof(Value) * (size_t)(size - idx - 1));
+        args[0].array_val.size--;
+        return removed;
+    }
+
+    if (strcmp(name, "delete") == 0) {
+        if (arg_count != 2 || args[0].type != TYPE_MAP || args[1].type != TYPE_STRING) {
+            report_error("delete() requires a map and a string key");
+            return make_bool(0);
+        }
+        Value *m = &args[0];
+        for (int i = 0; i < m->map_val.size; i++) {
+            if (strcmp(m->map_val.keys[i], args[1].str_val) != 0) continue;
+            free(m->map_val.keys[i]);
+            free_value(&m->map_val.values[i]);
+            int tail = m->map_val.size - i - 1;
+            if (tail > 0) {
+                memmove(&m->map_val.keys[i], &m->map_val.keys[i + 1], sizeof(char*) * (size_t)tail);
+                memmove(&m->map_val.values[i], &m->map_val.values[i + 1], sizeof(Value) * (size_t)tail);
+            }
+            m->map_val.size--;
+            return make_bool(1);
+        }
+        return make_bool(0);
     }
 
     report_error("Unknown built-in function");

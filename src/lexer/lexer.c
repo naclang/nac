@@ -31,7 +31,7 @@ static void advance(void) {
 
 static void skip_whitespace_and_comments(void) {
     while (pos < code_len) {
-        while (pos < code_len && isspace(code[pos])) {
+        while (pos < code_len && isspace((unsigned char)code[pos])) {
             if (code[pos] == '\n') saw_newline = 1;
             advance();
         }
@@ -54,12 +54,63 @@ static void skip_whitespace_and_comments(void) {
     }
 }
 
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} StrBuf;
+
+static void sb_init(StrBuf *sb) {
+    sb->data = NULL;
+    sb->len = 0;
+    sb->cap = 0;
+}
+
+static int sb_reserve(StrBuf *sb, size_t extra) {
+    size_t need = sb->len + extra + 1;
+    if (need <= sb->cap) return 1;
+    size_t cap = sb->cap ? sb->cap : 64;
+    while (cap < need) cap *= 2;
+    char *next = (char*)realloc(sb->data, cap);
+    if (!next) return 0;
+    sb->data = next;
+    sb->cap = cap;
+    return 1;
+}
+
+static int sb_append_char(StrBuf *sb, char c) {
+    if (!sb_reserve(sb, 1)) return 0;
+    sb->data[sb->len++] = c;
+    sb->data[sb->len] = '\0';
+    return 1;
+}
+
+static char *sb_take(StrBuf *sb) {
+    if (!sb->data) {
+        char *empty = (char*)malloc(1);
+        if (empty) empty[0] = '\0';
+        return empty;
+    }
+    sb->data[sb->len] = '\0';
+    char *out = sb->data;
+    sb->data = NULL;
+    sb->len = 0;
+    sb->cap = 0;
+    return out;
+}
+
 static void scan_token(void);
 
 static void push_token(Token t) {
     if (token_count >= token_capacity) {
-        token_capacity *= 2;
-        tokens = realloc(tokens, sizeof(Token) * token_capacity);
+        int new_cap = token_capacity ? token_capacity * 2 : 1024;
+        Token *next = (Token*)realloc(tokens, sizeof(Token) * (size_t)new_cap);
+        if (!next) {
+            if (t.type == TOK_STRING) free(t.str_val);
+            return;
+        }
+        tokens = next;
+        token_capacity = new_cap;
     }
     tokens[token_count++] = t;
 }
@@ -74,10 +125,22 @@ static Token synth_token(NaCTokenType type, int line, int col, int nl) {
     return t;
 }
 
-static void push_string_token(const char *text, int line, int col) {
+static void push_string_token_owned(char *text, int line, int col) {
     Token t = synth_token(TOK_STRING, line, col, 0);
-    strncpy(t.str_val, text, MAX_STRING_LEN - 1);
+    t.str_val = text ? text : (char*)calloc(1, 1);
     push_token(t);
+}
+
+static void push_string_token(const char *text, int line, int col) {
+    size_t len = text ? strlen(text) : 0;
+    char *copy = (char*)malloc(len + 1);
+    if (!copy) {
+        push_string_token_owned(NULL, line, col);
+        return;
+    }
+    if (len) memcpy(copy, text, len);
+    copy[len] = '\0';
+    push_string_token_owned(copy, line, col);
 }
 
 /* Template string:  `Hello ${name}, you are ${age + 1}!`
@@ -92,8 +155,8 @@ static void scan_template(void) {
     push_token(synth_token(TOK_LPAREN, line, col, nl));
     push_string_token("", line, col);
 
-    char *lit = (char*)malloc(MAX_STRING_LEN);
-    int len = 0;
+    StrBuf lit;
+    sb_init(&lit);
     int closed = 0;
 
     while (pos < code_len) {
@@ -112,17 +175,16 @@ static void scan_template(void) {
             else if (e == 't') ch = '\t';
             else if (e == 'r') ch = '\r';
             else ch = e;
-            if (len < MAX_STRING_LEN - 1) lit[len++] = ch;
+            if (!sb_append_char(&lit, ch)) { report_error("Out of memory"); break; }
             advance();
             continue;
         }
 
         if (ch == '$' && pos + 1 < code_len && code[pos + 1] == '{') {
-            if (len > 0) {
-                lit[len] = '\0';
+            if (lit.len > 0) {
                 push_token(synth_token(TOK_PLUS, line, col, 0));
-                push_string_token(lit, line, col);
-                len = 0;
+                push_string_token_owned(sb_take(&lit), line, col);
+                sb_init(&lit);
             }
             advance();
             advance();
@@ -145,23 +207,25 @@ static void scan_template(void) {
                     depth--;
                 }
                 prev_type = t.type;
+                /* Transfer ownership of any string token into the stream. */
                 push_token(t);
+                if (t.type == TOK_STRING) current_token.str_val = NULL;
             }
             push_token(synth_token(TOK_RPAREN, line, col, 0));
             continue;
         }
 
-        if (len < MAX_STRING_LEN - 1) lit[len++] = ch;
+        if (!sb_append_char(&lit, ch)) { report_error("Out of memory"); break; }
         advance();
     }
 
     if (!closed) report_error("Unterminated template string");
-    if (len > 0) {
-        lit[len] = '\0';
+    if (lit.len > 0) {
         push_token(synth_token(TOK_PLUS, line, col, 0));
-        push_string_token(lit, line, col);
+        push_string_token_owned(sb_take(&lit), line, col);
+    } else {
+        free(lit.data);
     }
-    free(lit);
 
     current_token = synth_token(TOK_RPAREN, line, col, 0);
 }
@@ -222,27 +286,33 @@ static void scan_token(void) {
 
     if (c == '"') {
         advance();
-        char str[MAX_STRING_LEN];
-        int len = 0;
-        while (pos < code_len && code[pos] != '"' && len < MAX_STRING_LEN - 1) {
-            if (code[pos] == '\\' && pos + 1 < code_len) {
+        StrBuf sb;
+        sb_init(&sb);
+        while (pos < code_len && code[pos] != '"') {
+            char ch = code[pos];
+            if (ch == '\\' && pos + 1 < code_len) {
                 advance();
                 switch (code[pos]) {
-                    case 'n': str[len++] = '\n'; break;
-                    case 't': str[len++] = '\t'; break;
-                    case '\\': str[len++] = '\\'; break;
-                    case '"': str[len++] = '"'; break;
-                    default: str[len++] = code[pos]; break;
+                    case 'n': ch = '\n'; break;
+                    case 't': ch = '\t'; break;
+                    case 'r': ch = '\r'; break;
+                    case '\\': ch = '\\'; break;
+                    case '"': ch = '"'; break;
+                    default: ch = code[pos]; break;
                 }
             } else {
-                str[len++] = code[pos];
+                ch = code[pos];
             }
+            if (!sb_append_char(&sb, ch)) { report_error("Out of memory"); break; }
             advance();
         }
-        str[len] = '\0';
-        if (pos < code_len && code[pos] == '"') advance();
+        if (pos < code_len && code[pos] == '"') {
+            advance();
+        } else {
+            report_error("Unterminated string");
+        }
         current_token.type = TOK_STRING;
-        strncpy(current_token.str_val, str, MAX_STRING_LEN - 1);
+        current_token.str_val = sb_take(&sb);
         return;
     }
 
@@ -362,30 +432,49 @@ static void scan_token(void) {
 
 void init_lexer(void) {
     if (tokens) {
+        for (int i = 0; i < token_count; i++) {
+            if (tokens[i].type == TOK_STRING && tokens[i].str_val) {
+                free(tokens[i].str_val);
+                tokens[i].str_val = NULL;
+            }
+        }
         free(tokens);
+        tokens = NULL;
     }
     token_capacity = 1024;
-    tokens = malloc(sizeof(Token) * token_capacity);
+    tokens = (Token*)calloc((size_t)token_capacity, sizeof(Token));
     token_count = 0;
     token_pos = 0;
     current_line = 1;
     current_col = 1;
     saw_newline = 0;
     prev_type = TOK_EOF;
+    memset(&current_token, 0, sizeof(current_token));
 
     // Build token array
     do {
+        memset(&current_token, 0, sizeof(current_token));
         scan_token();
         prev_type = current_token.type;
         push_token(current_token);
+        /* Ownership of string data transferred to tokens[token_count-1]. */
     } while (current_token.type != TOK_EOF);
 }
 
 void free_lexer(void) {
     if (tokens) {
+        for (int i = 0; i < token_count; i++) {
+            if (tokens[i].type == TOK_STRING && tokens[i].str_val) {
+                free(tokens[i].str_val);
+                tokens[i].str_val = NULL;
+            }
+        }
         free(tokens);
         tokens = NULL;
     }
+    token_count = 0;
+    token_capacity = 0;
+    token_pos = 0;
 }
 
 void next_token(void) {

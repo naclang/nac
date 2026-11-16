@@ -16,6 +16,7 @@
 #endif
 
 #include "core/compile.h"
+#include "core/config.h"
 #include "core/interpreter.h"
 #include "io/io.h"
 
@@ -122,14 +123,61 @@ static int start_dev_child(const char *exe, int argc, char **argv, PROCESS_INFOR
 }
 #endif
 
+/* Consumes NaC runtime flags (--port, --host, ...) starting at argv[start]
+ * and returns the index of the first argument after them: the script. Flags
+ * are accepted before the script name here (and after it, see
+ * set_script_args). An unrecognised "--option" before the script is an error
+ * rather than being taken for a file name. Returns -1 after printing why. */
+static int skip_runtime_flags(int argc, char **argv, int start) {
+    int i = start;
+    char error[256];
+    while (i < argc) {
+        int rc = nac_config_consume_flag(argc, argv, &i, error, sizeof(error));
+        if (rc < 0) {
+            fprintf(stderr, "[ERROR] %s\n", error);
+            return -1;
+        }
+        if (rc == 0) {
+            if (strncmp(argv[i], "--", 2) == 0 && argv[i][2] != '\0') {
+                fprintf(stderr,
+                        "[ERROR] Unknown option '%s'. NaC flags go before the script name "
+                        "(run %s with no arguments to list them); script arguments go after the script name.\n",
+                        argv[i], argv[0]);
+                return -1;
+            }
+            break;
+        }
+    }
+    return i;
+}
+
+/* Sets the script's arguments: everything after argv[script_idx], with NaC's
+ * own flags (--port, --host, ...) taken out wherever they appear, so
+ * `nac app.nac --port 9000` works like `nac --port 9000 app.nac`. A "--"
+ * stops that: everything after it reaches the script untouched. Returns 0, or
+ * -1 after printing why when a flag value is invalid. */
+static int set_script_args(int argc, char **argv, int script_idx) {
+    char error[256];
+    int count = argc - script_idx;
+    /* argv[script_idx] (the script path) plays the role of argv[0] here. */
+    if (nac_config_extract_args(&count, argv + script_idx, error, sizeof(error)) < 0) {
+        fprintf(stderr, "[ERROR] %s\n", error);
+        return -1;
+    }
+    set_cli_args(count - 1 > 0 ? count - 1 : 0, count > 1 ? &argv[script_idx + 1] : NULL);
+    return 0;
+}
+
 static int cmd_dev(int argc, char **argv) {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: %s dev <file.nac> [script args...]\n", argv[0]);
+    int script_idx = skip_runtime_flags(argc, argv, 2);
+    if (script_idx < 0) return 1;
+    if (script_idx >= argc) {
+        fprintf(stderr, "Usage: %s dev [flags] <file.nac> [script args...]\n", argv[0]);
         return 1;
     }
     uint64_t previous;
-    if (!dev_signature(argv[2], &previous)) {
-        fprintf(stderr, "[ERROR] Cannot watch script: %s\n", argv[2]);
+    if (!dev_signature(argv[script_idx], &previous)) {
+        fprintf(stderr, "[ERROR] Cannot watch script: %s\n", argv[script_idx]);
         return 1;
     }
 
@@ -146,13 +194,13 @@ static int cmd_dev(int argc, char **argv) {
             fprintf(stderr, "[ERROR] Could not start development process.\n");
             return 1;
         }
-        printf("[dev] running %s (watching for changes)\n", argv[2]);
+        printf("[dev] running %s (watching for changes)\n", argv[script_idx]);
         fflush(stdout);
         int changed = 0;
         for (;;) {
             DWORD wait = WaitForSingleObject(process.hProcess, 250);
             uint64_t current;
-            if (dev_signature(argv[2], &current) && current != previous) {
+            if (dev_signature(argv[script_idx], &current) && current != previous) {
                 previous = current;
                 changed = 1;
                 TerminateProcess(process.hProcess, 0);
@@ -180,7 +228,7 @@ static int cmd_dev(int argc, char **argv) {
             for (;;) {
                 dev_poll_pause();
                 uint64_t current;
-                if (dev_signature(argv[2], &current) && current != previous) {
+                if (dev_signature(argv[script_idx], &current) && current != previous) {
                     previous = current;
                     break;
                 }
@@ -203,7 +251,7 @@ static int cmd_dev(int argc, char **argv) {
             perror("[ERROR] exec");
             _exit(127);
         }
-        printf("[dev] running %s (watching for changes)\n", argv[2]);
+        printf("[dev] running %s (watching for changes)\n", argv[script_idx]);
         fflush(stdout);
         int changed = 0;
         for (;;) {
@@ -219,7 +267,7 @@ static int cmd_dev(int argc, char **argv) {
             }
             dev_poll_pause();
             uint64_t current;
-            if (dev_signature(argv[2], &current) && current != previous) {
+            if (dev_signature(argv[script_idx], &current) && current != previous) {
                 previous = current;
                 changed = 1;
                 kill(child, SIGTERM);
@@ -236,7 +284,7 @@ static int cmd_dev(int argc, char **argv) {
             for (;;) {
                 dev_poll_pause();
                 uint64_t current;
-                if (dev_signature(argv[2], &current) && current != previous) {
+                if (dev_signature(argv[script_idx], &current) && current != previous) {
                     previous = current;
                     break;
                 }
@@ -297,14 +345,16 @@ int main(int argc, char *argv[]) {
         return cmd_dev(argc, argv);
     }
     if (argc >= 2 && strcmp(argv[1], "test") == 0) {
-        if (argc < 3) {
-            fprintf(stderr, "Usage: %s test <file.nac> [script args...]\n", argv[0]);
+        int script_idx = skip_runtime_flags(argc, argv, 2);
+        if (script_idx < 0) return 1;
+        if (script_idx >= argc) {
+            fprintf(stderr, "Usage: %s test [flags] <file.nac> [script args...]\n", argv[0]);
             return 1;
         }
         init_interpreter();
         nac_test_mode = true;
-        set_cli_args(argc - 3 > 0 ? argc - 3 : 0, argc > 3 ? &argv[3] : NULL);
-        set_source_code(read_file(argv[2]));
+        if (set_script_args(argc, argv, script_idx) < 0) return 1;
+        set_source_code(read_file(argv[script_idx]));
         int exit_code = run_interpreter();
         shutdown_interpreter();
         if (exit_code == 0) {
@@ -313,12 +363,17 @@ int main(int argc, char *argv[]) {
         return exit_code;
     }
 
-    if (argc < 2) {
+    int script_idx = skip_runtime_flags(argc, argv, 1);
+    if (script_idx < 0) return 1;
+
+    if (script_idx >= argc) {
         printf("NaC Language Interpreter (%s)\n", NAC_VERSION);
-        printf("Usage: %s <file.nac> [script args...]\n", argv[0]);
+        printf("Usage: %s [flags] <file.nac> [script args...]\n", argv[0]);
         printf("       %s build <file.nac> [-o <output>]   (package as a standalone executable)\n\n", argv[0]);
-        printf("       %s dev <file.nac> [script args...]   (restart on save)\n", argv[0]);
-        printf("       %s test <file.nac> [script args...]  (run assertions)\n\n", argv[0]);
+        printf("       %s dev [flags] <file.nac> [script args...]   (restart on save)\n", argv[0]);
+        printf("       %s test [flags] <file.nac> [script args...]  (run assertions)\n\n", argv[0]);
+        printf("Flags (anywhere on the command line; -- passes the rest to the script):\n%s\n",
+               nac_config_usage());
 
         get_latest();
 
@@ -334,10 +389,11 @@ int main(int argc, char *argv[]) {
     init_interpreter();
 
     /* Everything after the script filename is made available to the
-     * script itself via args(), e.g. `nac tool.nac build --release`. */
-    set_cli_args(argc - 2 > 0 ? argc - 2 : 0, argc > 2 ? &argv[2] : NULL);
+     * script itself via args(), e.g. `nac tool.nac build --release`, minus
+     * NaC's own flags (see set_script_args). */
+    if (set_script_args(argc, argv, script_idx) < 0) return 1;
 
-    set_source_code(read_file(argv[1]));
+    set_source_code(read_file(argv[script_idx]));
 
     int exit_code = run_interpreter();
     shutdown_interpreter();

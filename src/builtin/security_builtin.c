@@ -4,9 +4,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "../crypto/crypto.h"
 #include "../net/server_common.h"
+#include "../runtime/json.h"
 #include "../util/error.h"
 
 #define PASSWORD_SALT_LEN 16
@@ -328,12 +330,177 @@ static int password_verify(Value pw, Value hash) {
                                    expected, expected_len);
 }
 
+/* ---- JWT (HS256) ------------------------------------------------------- */
+
+#define JWT_HEADER_JSON "{\"alg\":\"HS256\",\"typ\":\"JWT\"}"
+#define JWT_MAX_HEADER_B64 256
+
+static Value jwt_sign(Value payload, Value secret) {
+    if (payload.type != TYPE_MAP || secret.type != TYPE_STRING) {
+        report_error("jwtSign() requires (payload map, secret string)");
+        return make_string("");
+    }
+    if (secret.str_val[0] == '\0') {
+        report_error("jwtSign(): secret must not be empty");
+        return make_string("");
+    }
+
+    char *json = json_stringify_value(payload);
+    if (!json) {
+        report_error("jwtSign(): could not serialize payload");
+        return make_string("");
+    }
+
+    /* header.payload.signature must fit in one NaC string. */
+    size_t json_len = strlen(json);
+    char token[MAX_STRING_LEN];
+    size_t used = 0;
+    int ok = 1;
+
+    if (!nac_base64_encode((const unsigned char *)JWT_HEADER_JSON, strlen(JWT_HEADER_JSON),
+                           token, sizeof(token), 1, 0)) {
+        ok = 0;
+    } else {
+        used = strlen(token);
+        token[used++] = '.';
+        token[used] = '\0';
+        if (json_len > MAX_STRING_LEN ||
+            !nac_base64_encode((const unsigned char *)json, json_len,
+                               token + used, sizeof(token) - used, 1, 0)) {
+            ok = 0;
+        }
+    }
+    free(json);
+    if (!ok) {
+        report_error("jwtSign(): token would be longer than 8191 characters");
+        return make_string("");
+    }
+
+    used = strlen(token);
+    unsigned char mac[NAC_SHA256_LEN];
+    if (!nac_hmac_sha256((const unsigned char *)secret.str_val, strlen(secret.str_val),
+                         (const unsigned char *)token, used, mac)) {
+        report_error("jwtSign(): crypto failure");
+        return make_string("");
+    }
+
+    char sig[64];
+    if (!nac_base64_encode(mac, sizeof(mac), sig, sizeof(sig), 1, 0) ||
+        used + 1 + strlen(sig) >= sizeof(token)) {
+        report_error("jwtSign(): token would be longer than 8191 characters");
+        return make_string("");
+    }
+    token[used++] = '.';
+    strcpy(token + used, sig);
+    return make_string(token);
+}
+
+/* Returns the claims map, or null for any token that must not be trusted:
+ * malformed, wrong algorithm, bad signature, expired (exp), or not yet valid
+ * (nbf). Callers treat null as "unauthenticated". */
+static Value jwt_verify(Value token_v, Value secret) {
+    if (token_v.type != TYPE_STRING || secret.type != TYPE_STRING) {
+        report_error("jwtVerify() requires (token string, secret string)");
+        return make_null();
+    }
+    if (secret.str_val[0] == '\0') {
+        report_error("jwtVerify(): secret must not be empty");
+        return make_null();
+    }
+
+    char token[MAX_STRING_LEN];
+    strcpy(token, token_v.str_val);
+
+    char *dot1 = strchr(token, '.');
+    char *dot2 = dot1 ? strchr(dot1 + 1, '.') : NULL;
+    if (!dot1 || !dot2 || strchr(dot2 + 1, '.')) return make_null();
+    if (dot1 == token || dot2 == dot1 + 1 || dot2[1] == '\0') return make_null();
+
+    size_t signing_len = (size_t)(dot2 - token);       /* "header.payload" */
+    char *header_b64 = token;
+    char *payload_b64 = dot1 + 1;
+    char *sig_b64 = dot2 + 1;
+    *dot1 = '\0';
+    *dot2 = '\0';
+
+    /* 1. The algorithm must be exactly HS256 ("none" and every other value
+     *    is refused), decided from the header before anything is trusted. */
+    if (strlen(header_b64) > JWT_MAX_HEADER_B64) return make_null();
+    unsigned char header_raw[JWT_MAX_HEADER_B64 + 1];
+    size_t header_len = 0;
+    if (!nac_base64_decode(header_b64, header_raw, sizeof(header_raw) - 1, &header_len)) {
+        return make_null();
+    }
+    header_raw[header_len] = '\0';
+
+    Value header;
+    if (!json_try_parse_value((const char *)header_raw, &header)) return make_null();
+    Value *alg = (header.type == TYPE_MAP) ? map_get(&header, "alg") : NULL;
+    int alg_ok = alg && alg->type == TYPE_STRING && strcmp(alg->str_val, "HS256") == 0;
+    free_value(&header);
+    if (!alg_ok) return make_null();
+
+    /* 2. Signature over the exact bytes received, compared in constant time. */
+    unsigned char expected[NAC_SHA256_LEN];
+    unsigned char given[NAC_SHA256_LEN + 8];
+    size_t given_len = 0;
+    *dot1 = '.';                                        /* restore for the MAC */
+    if (!nac_hmac_sha256((const unsigned char *)secret.str_val, strlen(secret.str_val),
+                         (const unsigned char *)token, signing_len, expected)) {
+        report_error("jwtVerify(): crypto failure");
+        return make_null();
+    }
+    *dot1 = '\0';
+    if (!nac_base64_decode(sig_b64, given, sizeof(given), &given_len) ||
+        given_len != NAC_SHA256_LEN ||
+        !nac_constant_time_equal(expected, sizeof(expected), given, given_len)) {
+        return make_null();
+    }
+
+    /* 3. Only now is the payload parsed. */
+    unsigned char payload_raw[MAX_STRING_LEN];
+    size_t payload_len = 0;
+    if (!nac_base64_decode(payload_b64, payload_raw, sizeof(payload_raw) - 1, &payload_len)) {
+        return make_null();
+    }
+    payload_raw[payload_len] = '\0';
+
+    Value claims;
+    if (!json_try_parse_value((const char *)payload_raw, &claims)) return make_null();
+    if (claims.type != TYPE_MAP) {
+        free_value(&claims);
+        return make_null();
+    }
+
+    /* 4. Time claims, in seconds, no leeway. */
+    double now = (double)time(NULL);
+    Value *exp_claim = map_get(&claims, "exp");
+    if (exp_claim) {
+        if ((exp_claim->type != TYPE_INT && exp_claim->type != TYPE_FLOAT) ||
+            now >= to_float(*exp_claim)) {
+            free_value(&claims);
+            return make_null();
+        }
+    }
+    Value *nbf_claim = map_get(&claims, "nbf");
+    if (nbf_claim) {
+        if ((nbf_claim->type != TYPE_INT && nbf_claim->type != TYPE_FLOAT) ||
+            now < to_float(*nbf_claim)) {
+            free_value(&claims);
+            return make_null();
+        }
+    }
+
+    return claims;
+}
+
 bool is_security_builtin(const char *name) {
     static const char *builtins[] = {
         "randomBytes", "uuid", "sessionId",
         "sha256", "hmac", "base64Encode", "base64Decode",
         "safeEqual", "passwordHash", "passwordVerify",
-        "setCookie", "clearCookie"
+        "setCookie", "clearCookie",
+        "jwtSign", "jwtVerify"
     };
 
     for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); i++) {
@@ -514,6 +681,22 @@ Value call_security_builtin(const char *name, Value *args, int arg_count) {
             return make_bool(0);
         }
         return make_bool(password_verify(args[0], args[1]));
+    }
+
+    if (strcmp(name, "jwtSign") == 0) {
+        if (arg_count != 2) {
+            report_error("jwtSign() requires 2 arguments (payload map, secret)");
+            return make_string("");
+        }
+        return jwt_sign(args[0], args[1]);
+    }
+
+    if (strcmp(name, "jwtVerify") == 0) {
+        if (arg_count != 2) {
+            report_error("jwtVerify() requires 2 arguments (token, secret)");
+            return make_null();
+        }
+        return jwt_verify(args[0], args[1]);
     }
 
     if (strcmp(name, "setCookie") == 0) {

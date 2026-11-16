@@ -39,7 +39,7 @@ typedef struct ASTNode {
     union {
         int int_val;
         double float_val;
-        char str_val[MAX_STRING_LEN];
+        char *str_val;          /* heap-allocated for string literals */
         char var_name[MAX_TOKEN_LEN];
         struct {
             NaCTokenType op;

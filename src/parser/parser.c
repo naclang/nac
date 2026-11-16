@@ -16,10 +16,30 @@ static ASTNode *create_node(ASTNodeType type) {
     return node;
 }
 
+static char *dup_cstr(const char *s) {
+    if (!s) s = "";
+    size_t len = strlen(s);
+    char *copy = (char*)malloc(len + 1);
+    if (!copy) return NULL;
+    memcpy(copy, s, len + 1);
+    return copy;
+}
+
+static ASTNode *create_string_node(const char *s) {
+    ASTNode *node = create_node(AST_STRING_LITERAL);
+    node->str_val = dup_cstr(s);
+    if (!node->str_val) node->str_val = (char*)calloc(1, 1);
+    return node;
+}
+
 void free_ast(ASTNode *node) {
     if (!node) return;
 
     switch (node->type) {
+        case AST_STRING_LITERAL:
+            free(node->str_val);
+            node->str_val = NULL;
+            break;
         case AST_BINARY_OP:
             free_ast(node->binary.left);
             free_ast(node->binary.right);
@@ -236,8 +256,7 @@ static ASTNode *parse_atom(void) {
     }
 
     if (current_token.type == TOK_STRING) {
-        node = create_node(AST_STRING_LITERAL);
-        strncpy(node->str_val, current_token.str_val, MAX_STRING_LEN - 1);
+        node = create_string_node(current_token.str_val ? current_token.str_val : "");
         next_token();
         return node;
     }
@@ -291,8 +310,7 @@ static ASTNode *parse_atom(void) {
         while (current_token.type != TOK_RBRACE && current_token.type != TOK_EOF) {
             ASTNode *key;
             if (current_token.type == TOK_IDENT) {
-                key = create_node(AST_STRING_LITERAL);
-                strncpy(key->str_val, current_token.ident, MAX_TOKEN_LEN - 1);
+                key = create_string_node(current_token.ident);
                 next_token();
             } else {
                 key = parse_expression();
@@ -393,8 +411,7 @@ static ASTNode *parse_primary(void) {
                 report_error("Expected a property name after '.'");
                 break;
             }
-            ASTNode *key = create_node(AST_STRING_LITERAL);
-            strncpy(key->str_val, current_token.ident, MAX_TOKEN_LEN - 1);
+            ASTNode *key = create_string_node(current_token.ident);
             next_token();
 
             /* http.get { url: "..." }  /  http.post { ... } etc.: the
@@ -669,13 +686,12 @@ ASTNode *parse_statement(void) {
         expect(TOK_LPAREN);
         ASTNode *node = create_node(AST_OUT);
         if (current_token.type == TOK_RPAREN) {
-            node->out_stmt.value = create_node(AST_STRING_LITERAL);
+            node->out_stmt.value = create_string_node("");
         } else {
             ASTNode *value = parse_expression();
             while (current_token.type == TOK_COMMA) {
                 next_token();
-                ASTNode *space = create_node(AST_STRING_LITERAL);
-                strcpy(space->str_val, " ");
+                ASTNode *space = create_string_node(" ");
                 ASTNode *lhs = create_node(AST_BINARY_OP);
                 lhs->binary.op = TOK_PLUS;
                 lhs->binary.left = value;
@@ -731,6 +747,50 @@ ASTNode *parse_statement(void) {
         end_stmt();
 
         return node;
+    }
+
+    if (current_token.type == TOK_IDENT &&
+        (strcmp(current_token.ident, "before") == 0 || strcmp(current_token.ident, "after") == 0) &&
+        (peek_token_type(1) == TOK_LBRACE ||
+         (peek_token_type(1) == TOK_STRING && peek_token_type(2) == TOK_LBRACE))) {
+        /* before { ... }   after { ... }   before "/admin/*" { ... }
+         * Middleware: not reserved words (`before = 1` is still a variable);
+         * they are recognised only as `before {` or `before "pattern" {`.
+         * Compiled to a function with the route signature
+         * (method, path, query, headers, body, params, cookie), plus a final
+         * `response` parameter for `after`. */
+        int is_before = strcmp(current_token.ident, "before") == 0;
+        next_token();
+
+        char pattern[512] = "";
+        if (current_token.type == TOK_STRING) {
+            strncpy(pattern, current_token.str_val, sizeof(pattern) - 1);
+            pattern[sizeof(pattern) - 1] = '\0';
+            next_token();
+        }
+
+        if (func_count >= MAX_FUNCS) {
+            report_error("Too many functions/routes");
+            return NULL;
+        }
+
+        static const char *mw_params[] = {
+            "method", "path", "query", "headers", "body", "params", "cookie", "response"
+        };
+        Function *func = &functions[func_count++];
+        snprintf(func->name, MAX_TOKEN_LEN, is_before ? "__before_%d" : "__after_%d", func_count);
+        func->param_count = is_before ? 7 : 8;
+        for (int i = 0; i < func->param_count; i++) {
+            strncpy(func->params[i], mw_params[i], MAX_TOKEN_LEN - 1);
+            func->params[i][MAX_TOKEN_LEN - 1] = '\0';
+        }
+        func->body = parse_block();
+        end_stmt();
+
+        if (middleware_add(is_before ? MW_BEFORE : MW_AFTER, pattern, func->name) != 0) {
+            report_error("Too many before/after blocks");
+        }
+        return NULL;
     }
 
     if (current_token.type == TOK_ROUTE) {
