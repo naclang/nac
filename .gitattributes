@@ -1,0 +1,5 @@
+# Repo stores LF; files are checked out as CRLF (Windows).
+* text=auto eol=crlf
+*.sh text eol=lf
+*.db binary
+third_party/** -diff

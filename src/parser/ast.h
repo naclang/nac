@@ -60,6 +60,7 @@ typedef struct ASTNode {
             char func_name[MAX_TOKEN_LEN];
             struct ASTNode **args;
             int arg_count;
+            void *cached_func;    /* Function* resolved on first call (user fns only) */
         } call;
         struct {
             struct ASTNode **statements;
@@ -124,6 +125,9 @@ typedef struct ASTNode {
             struct ASTNode *body;
         } foreach_stmt;
     };
+    unsigned int name_hash;   /* cached hash() of var_name; 0 = not computed yet */
+    int line;                 /* source position, so runtime errors point at the code */
+    int col;
 } ASTNode;
 
 #endif

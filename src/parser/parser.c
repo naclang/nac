@@ -13,6 +13,8 @@
 static ASTNode *create_node(ASTNodeType type) {
     ASTNode *node = (ASTNode*)calloc(1, sizeof(ASTNode));
     node->type = type;
+    node->line = current_token.line;
+    node->col = current_token.col;
     return node;
 }
 
@@ -144,10 +146,59 @@ static NaCTokenType compound_to_op(NaCTokenType type) {
     }
 }
 
+static const char *token_name(NaCTokenType t) {
+    switch (t) {
+        case TOK_EOF: return "end of file";
+        case TOK_INT: return "a number";
+        case TOK_FLOAT: return "a number";
+        case TOK_STRING: return "a string";
+        case TOK_IDENT: return "a name";
+        case TOK_PLUS: return "'+'";
+        case TOK_MINUS: return "'-'";
+        case TOK_STAR: return "'*'";
+        case TOK_SLASH: return "'/'";
+        case TOK_PERCENT: return "'%'";
+        case TOK_EQ: return "'=='";
+        case TOK_NEQ: return "'!='";
+        case TOK_LT: return "'<'";
+        case TOK_GT: return "'>'";
+        case TOK_LTE: return "'<='";
+        case TOK_GTE: return "'>='";
+        case TOK_AND: return "'and'";
+        case TOK_OR: return "'or'";
+        case TOK_NOT: return "'not'";
+        case TOK_ASSIGN: return "'='";
+        case TOK_SEMI: return "';'";
+        case TOK_COMMA: return "','";
+        case TOK_LPAREN: return "'('";
+        case TOK_RPAREN: return "')'";
+        case TOK_LBRACE: return "'{'";
+        case TOK_RBRACE: return "'}'";
+        case TOK_LBRACKET: return "'['";
+        case TOK_RBRACKET: return "']'";
+        case TOK_COLON: return "':'";
+        case TOK_DOT: return "'.'";
+        case TOK_IF: return "'if'";
+        case TOK_ELSE: return "'else'";
+        case TOK_ELIF: return "'elif'";
+        case TOK_FOR: return "'for'";
+        case TOK_WHILE: return "'while'";
+        case TOK_IN: return "'in'";
+        case TOK_FN: return "'fn'";
+        case TOK_TRY: return "'try'";
+        case TOK_CATCH: return "'catch'";
+        default: return "another token";
+    }
+}
+
 static void expect(NaCTokenType type) {
     if (current_token.type != type) {
         char msg[256];
-        snprintf(msg, sizeof(msg), "Expected token type %d, got %d", type, current_token.type);
+        if (current_token.type == TOK_IDENT) {
+            snprintf(msg, sizeof(msg), "Expected %s but found '%s'", token_name(type), current_token.ident);
+        } else {
+            snprintf(msg, sizeof(msg), "Expected %s but found %s", token_name(type), token_name(current_token.type));
+        }
         report_error(msg);
         next_token();
     } else {
@@ -281,6 +332,7 @@ static ASTNode *parse_atom(void) {
             int capacity = 4;
             node->call.args = (ASTNode**)malloc(sizeof(ASTNode*) * capacity);
             node->call.arg_count = 0;
+            node->call.cached_func = NULL;
 
             if (current_token.type != TOK_RPAREN) {
                 do {

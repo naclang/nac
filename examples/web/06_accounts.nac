@@ -1,7 +1,7 @@
-// examples/web/06_accounts.nac -- kayit, giris, cikis, oturum ve rol kontrolu
+// examples/web/06_accounts.nac -- register, login, logout, sessions and role checks
 //
-// Calistir:  ./nac examples/web/06_accounts.nac
-// Dene:
+// Run:  ./nac examples/web/06_accounts.nac
+// Try:
 //   curl -i -X POST http://localhost:8080/register \
 //        -d '{"username":"ada","password":"correct horse"}'
 //   curl -i -c cookies.txt -X POST http://localhost:8080/login \
@@ -10,12 +10,12 @@
 //   curl -i -b cookies.txt http://localhost:8080/admin
 //   curl -i -b cookies.txt -X POST http://localhost:8080/logout
 //
-// Kullanicilar accounts_users.json dosyasinda tutulur. Parolalar PBKDF2 ile
-// tuzlanip yavaslatilir; oturum kimlikleri sunucu tarafinda rastgele uretilir
-// ve HttpOnly bir cookie ile tasinir.
+// Users are kept in accounts_users.json. Passwords are salted and slowed
+// down with PBKDF2; session IDs are generated randomly on the server and
+// carried in an HttpOnly cookie.
 
 USERS_FILE = "accounts_users.json"
-SESSION_TTL = 86400          // 1 gun (saniye)
+SESSION_TTL = 86400          // 1 day (seconds)
 sessions = {}                // sid -> { username, expires }
 
 fn loadUsers() {
@@ -59,8 +59,8 @@ fn publicUser(u) {
     return { username: u.username, role: u.role }
 }
 
-// Cookie'deki sid'yi sunucu tarafindaki oturum tablosunda arar. Cookie
-// degeri tek basina yetmez: gecerli ve suresi dolmamis bir kayit olmali.
+// Looks up the cookie's sid in the server-side session table. The cookie
+// value alone is not enough: there must be a valid, unexpired record.
 fn sessionUser(sid) {
     if isNull(sid) or type(sid) != "string" or sid == "" {
         return null
@@ -122,8 +122,8 @@ route POST "/register" {
         return errorJson("username already exists", 409)
     }
 
-    // Ilk hesap admin olur; sonrakiler normal kullanici. Gercek bir uygulamada
-    // rol atamasini ayri bir yonetici akisina birakin.
+    // The first account becomes admin; later ones are regular users. In a real
+    // app, leave role assignment to a separate admin flow.
     role = "user"
     if len(users) == 0 {
         role = "admin"

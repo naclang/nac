@@ -4,10 +4,9 @@
 #include "../core/config.h"
 #include "../runtime/value.h"
 
-/* The header limit, read timeout, rate limit and connection cap are runtime
- * settings (nac_cfg in core/config.h: flags, environment, defaults). The body
- * limit is not: it is the size of a NaC string. */
-#define NAC_MAX_BODY_BYTES (MAX_STRING_LEN - 1)
+/* The header limit, read timeout, rate limit, connection cap and body limit
+ * are runtime settings (nac_cfg in core/config.h: flags, environment, defaults). */
+#define NAC_MAX_BODY_BYTES (nac_cfg.max_body_bytes)
 
 typedef struct {
     char method[16];
@@ -16,7 +15,7 @@ typedef struct {
     Value query;    /* map: string -> string */
     Value headers;  /* map: string -> string (lowercased keys) */
     Value cookie;   /* map: cookie name -> value */
-    char body[MAX_STRING_LEN];
+    char *body;     /* heap, always NUL-terminated; sized to the request */
     int content_length;
     int http_minor;   /* minor version of "HTTP/1.x"; 0 for HTTP/1.0 or older */
     char client_ip[64];
@@ -34,6 +33,10 @@ void nac_http_parse_request(const char *raw, int header_end, NacHttpRequest *req
  * nac_http_parse_request. */
 void nac_http_free_request(NacHttpRequest *req);
 
+/* Copies `len` bytes of request body into req->body (replacing the empty
+ * default). Returns 0, or -1 when out of memory. */
+int nac_http_set_body(NacHttpRequest *req, const char *data, int len);
+
 /* True when the connection may be reused for another request: HTTP/1.1
  * defaults to persistent, HTTP/1.0 requires "Connection: keep-alive", and
  * either version can opt out with "Connection: close". */
@@ -46,6 +49,13 @@ int nac_http_request_keep_alive(const NacHttpRequest *req);
  * indicates whether the NaC function was actually found and called;
  * `result` is only read when it is non-zero. `keep_alive` selects the
  * Connection header and `is_head` suppresses the response body for HEAD. */
+/* Same as nac_http_build_response, but the response is returned as a
+ * malloc'd, NUL-terminated buffer of any size (caller free()s it) and
+ * its length is stored in *out_len. Returns NULL on failure. */
+char *nac_http_build_response_alloc(int found_handler, const char *handler_name,
+                                    Value result, int keep_alive, int is_head,
+                                    int *out_len, int *out_status);
+
 int nac_http_build_response(int found_handler, const char *handler_name, Value result,
                              int keep_alive, int is_head, char *out, int out_cap,
                              int *out_status);

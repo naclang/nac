@@ -1,18 +1,18 @@
-// examples/web/03_guestbook.nac -- HTML form + dosyada kalici veri
+// examples/web/03_guestbook.nac -- an HTML form + data kept in a file
 //
-// Calistir:  ./nac examples/web/03_guestbook.nac
-// Dene:      http://localhost:8080/   (tarayicidan formu doldur)
+// Run:  ./nac examples/web/03_guestbook.nac
+// Try:      http://localhost:8080/   (fill in the form in a browser)
 
 FILE = "guestbook.txt"
 
-// HTML'e basarken kullanici girdisini temizle
+// Escape user input before putting it in HTML
 fn esc(s) {
     s = replace(s, "&", "&amp;")
     s = replace(s, "<", "&lt;")
     return replace(s, ">", "&gt;")
 }
 
-// "name=Ada&msg=Merhaba+d%C3%BCnya" -> { name: "Ada", msg: "Merhaba dünya" }
+// "name=Ada&msg=Hello+world" -> { name: "Ada", msg: "Hello world" }
 fn parseForm(text) {
     out = {}
     for pair in split(text, "&") {
@@ -29,21 +29,21 @@ route GET "/" {
             if line != "" { items += `<li>${esc(line)}</li>` }
         }
     } catch e {
-        items = "<li><i>Henuz kimse imzalamadi.</i></li>"
+        items = "<li><i>No signatures yet.</i></li>"
     }
-    return html(`<h1>Ziyaretci defteri</h1>
+    return html(`<h1>Guestbook</h1>
 <ul>${items}</ul>
 <form method="POST" action="/sign">
-  <input name="name" placeholder="Adin" required>
-  <input name="msg" placeholder="Mesajin" required>
-  <button>Imzala</button>
+  <input name="name" placeholder="Your name" required>
+  <input name="msg" placeholder="Your message" required>
+  <button>Sign</button>
 </form>`)
 }
 
 route POST "/sign" {
     form = parseForm(body)
     if not ("name" in form) or not ("msg" in form) {
-        return html("<p>Ad ve mesaj gerekli.</p>", 400)
+        return html("<p>Name and message are required.</p>", 400)
     }
     append(FILE, form.name + ": " + form.msg + "\n")
     return redirect("/")

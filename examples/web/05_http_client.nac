@@ -1,33 +1,33 @@
 // Example: HTTP Requests in NaC Language
 // ------------------------------------------
-// Yazim:  http.<yontem> { ayarlar }     (get, post, put, patch, delete)
-// Sonuc bir map: status, ok, body, data (JSON ise parse edilmis), error
+// Syntax:  http.<method> { options }     (get, post, put, patch, delete)
+// The result is a map: status, ok, body, data (parsed if JSON), error
 
-print("\n=== HTTP GET ORNEGI ===")
+print("\n=== HTTP GET EXAMPLE ===")
 res = http.get { url: "https://api.ipify.org/?format=json" }
 print(res.status, res.ok)
 print("ip:", res.data.ip)
 
-print("\n=== HTTP POST ORNEGI ===")
+print("\n=== HTTP POST EXAMPLE ===")
 res = http.post {
     url: "https://httpbin.org/post",
-    body: { mesaj: "Merhaba", dil: "NaC" },      // map/array -> JSON olarak gider
+    body: { message: "Hello", language: "NaC" }, // map/array -> sent as JSON
     headers: { "X-Demo": "nac" }
 }
-print(res.status, res.data.json.mesaj)
+print(res.status, res.data.json.message)
 
-print("\n=== HTTP PUT ORNEGI ===")
-res = http.put { url: "https://httpbin.org/put", body: { guncelleme: "Bu bir PUT istegi" } }
+print("\n=== HTTP PUT EXAMPLE ===")
+res = http.put { url: "https://httpbin.org/put", body: { update: "This is a PUT request" } }
 print(res.status)
 
-print("\n=== HTTP DELETE ORNEGI ===")
+print("\n=== HTTP DELETE EXAMPLE ===")
 res = http.delete { url: "https://httpbin.org/delete" }
 print(res.status)
 
-print("\n=== CALLBACK ORNEGI ===")
+print("\n=== CALLBACK EXAMPLE ===")
 http.get {
     url: "https://api.ipify.org/?format=json",
     callback: fn(r) {
-        if r.ok { print("callback ip:", r.data.ip) } else { print("hata:", r.error) }
+        if r.ok { print("callback ip:", r.data.ip) } else { print("error:", r.error) }
     }
 }

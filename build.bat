@@ -14,9 +14,9 @@ if "%SOURCES%"=="" (
     exit /b 1
 )
 
-:: SQLite (istege bagli): sqlite.org'dan indirilen "amalgamation" icindeki
-:: sqlite3.c ve sqlite3.h dosyalarini third_party\sqlite\ klasorune koyarsan
-:: dbOpen()/dbQuery()/... calisir. Yoksa bu fonksiyonlar hata mesaji verir.
+:: SQLite (optional): if sqlite3.c and sqlite3.h from the sqlite.org
+:: "amalgamation" are placed in third_party\sqlite\, dbOpen()/dbQuery()/...
+:: work. Otherwise those functions report an error.
 set "SQLITE_MSVC="
 set "SQLITE_GCC="
 if exist "third_party\sqlite\sqlite3.c" (
@@ -27,11 +27,11 @@ if exist "third_party\sqlite\sqlite3.c" (
     echo [WARN] third_party\sqlite\sqlite3.c not found: building WITHOUT SQLite support, see README.
 )
 
-:: 1. Adim: Ortamda halihazirda cl.exe var mi kontrol et
+:: 1. Check whether cl.exe is already on PATH
 where cl.exe >nul 2>nul
 if %ERRORLEVEL% EQU 0 goto :BUILD_MSVC
 
-:: 2. Adim: cl.exe PATH'te degilse Visual Studio kurulumunu ara ve yukle
+:: 2. If cl.exe is not on PATH, locate and load the Visual Studio environment
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 if exist "%VSWHERE%" (
     for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
@@ -46,11 +46,11 @@ if exist "%VSWHERE%" (
     )
 )
 
-:: 3. Adim: MSVC bulunamadiysa GCC kontrol et
+:: 3. If MSVC was not found, check for GCC
 where gcc >nul 2>nul
 if %ERRORLEVEL% EQU 0 goto :BUILD_GCC
 
-:: Hicbiri bulunamadiysa hata ver
+:: If neither is found, fail
 echo [ERROR] Neither MSVC (cl.exe) nor GCC was found on this system.
 exit /b 1
 

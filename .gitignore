@@ -1,3 +1,8 @@
-nac.exe
+# build outputs
 nac
+nac.exe
 build/
+
+# local data / editor state
+*.db
+.vscode/

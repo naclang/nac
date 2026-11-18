@@ -1,0 +1,23 @@
+// 08 - A small game: guess the number
+//
+// Run:  nac examples/basics/08_guess_game.nac
+
+secret = 1 + (now() % 100)
+guess = null
+
+for attempt in range(10) {
+    guess = int(input("Guess a number (1-100): "))
+
+    if guess == secret {
+        print("You got it!")
+        break
+    } elif guess < secret {
+        print("Try a bigger number.")
+    } else {
+        print("Try a smaller number.")
+    }
+}
+
+if guess != secret {
+    print("Out of attempts. The number was", secret)
+}

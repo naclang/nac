@@ -143,6 +143,71 @@ static void push_string_token(const char *text, int line, int col) {
     push_string_token_owned(copy, line, col);
 }
 
+/* Backslash-u (four hex digits, UTF-16 surrogate pairs allowed) and
+ * backslash-x (two hex digits, one raw byte) escapes in string literals. */
+static int lex_hex(const char *s, int avail, int digits, unsigned *out) {
+    if (avail < digits) return 0;
+    unsigned v = 0;
+    for (int i = 0; i < digits; i++) {
+        char h = s[i];
+        v <<= 4;
+        if (h >= '0' && h <= '9') v |= (unsigned)(h - '0');
+        else if (h >= 'a' && h <= 'f') v |= (unsigned)(10 + h - 'a');
+        else if (h >= 'A' && h <= 'F') v |= (unsigned)(10 + h - 'A');
+        else return 0;
+    }
+    *out = v;
+    return 1;
+}
+
+/* Called with pos on the 'u' or 'x' that follows a backslash. Returns 0 (and
+ * consumes nothing) when the hex digits are missing; otherwise appends the
+ * character, leaves pos after the escape and returns 1. */
+static int lex_unicode_escape(StrBuf *sb) {
+    int digits = (code[pos] == 'u') ? 4 : 2;
+    unsigned cp = 0;
+    if (!lex_hex(&code[pos + 1], code_len - pos - 1, digits, &cp)) return 0;
+    for (int i = 0; i <= digits; i++) advance();
+
+    if (cp == 0) {
+        report_error("A string cannot contain a NUL character (zero escape)");
+        return 1;
+    }
+    if (digits == 2) {
+        sb_append_char(sb, (char)cp);
+        return 1;
+    }
+    if (cp >= 0xD800 && cp <= 0xDBFF) {
+        unsigned low = 0;
+        if (pos + 1 < code_len && code[pos] == '\\' && code[pos + 1] == 'u' &&
+            lex_hex(&code[pos + 2], code_len - pos - 2, 4, &low) && low >= 0xDC00 && low <= 0xDFFF) {
+            cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+            for (int i = 0; i < 6; i++) advance();
+        } else {
+            cp = 0xFFFD;
+        }
+    } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+        cp = 0xFFFD;
+    }
+
+    if (cp <= 0x7F) {
+        sb_append_char(sb, (char)cp);
+    } else if (cp <= 0x7FF) {
+        sb_append_char(sb, (char)(0xC0 | (cp >> 6)));
+        sb_append_char(sb, (char)(0x80 | (cp & 0x3F)));
+    } else if (cp <= 0xFFFF) {
+        sb_append_char(sb, (char)(0xE0 | (cp >> 12)));
+        sb_append_char(sb, (char)(0x80 | ((cp >> 6) & 0x3F)));
+        sb_append_char(sb, (char)(0x80 | (cp & 0x3F)));
+    } else {
+        sb_append_char(sb, (char)(0xF0 | (cp >> 18)));
+        sb_append_char(sb, (char)(0x80 | ((cp >> 12) & 0x3F)));
+        sb_append_char(sb, (char)(0x80 | ((cp >> 6) & 0x3F)));
+        sb_append_char(sb, (char)(0x80 | (cp & 0x3F)));
+    }
+    return 1;
+}
+
 /* Template string:  `Hello ${name}, you are ${age + 1}!`
  * Expanded right here into the token stream of
  *   ("" + "Hello " + (name) + ", you are " + (age + 1) + "!")
@@ -170,6 +235,9 @@ static void scan_template(void) {
 
         if (ch == '\\' && pos + 1 < code_len) {
             advance();
+            if ((code[pos] == 'u' || code[pos] == 'x') && lex_unicode_escape(&lit)) {
+                continue;
+            }
             char e = code[pos];
             if (e == 'n') ch = '\n';
             else if (e == 't') ch = '\t';
@@ -261,25 +329,39 @@ static void scan_token(void) {
             advance();
         }
 
-        double value = 0;
-        while (pos < code_len && isdigit(code[pos])) {
-            value = value * 10 + (code[pos] - '0');
-            advance();
-        }
-
+        /* Scan the whole literal, then let strtod() convert it, so 0.1, 1e3
+         * and 2.5E-2 are exact and an integer literal that does not fit in
+         * 32 bits becomes a float instead of silently wrapping around. */
+        int num_start = pos;
+        int is_float = 0;
+        while (pos < code_len && isdigit(code[pos])) advance();
         if (pos < code_len && code[pos] == '.') {
+            is_float = 1;
             advance();
-            double decimal = 0.1;
-            while (pos < code_len && isdigit(code[pos])) {
-                value += (code[pos] - '0') * decimal;
-                decimal *= 0.1;
-                advance();
+            while (pos < code_len && isdigit(code[pos])) advance();
+        }
+        if (pos < code_len && (code[pos] == 'e' || code[pos] == 'E')) {
+            int q = pos + 1;
+            if (q < code_len && (code[q] == '+' || code[q] == '-')) q++;
+            if (q < code_len && isdigit(code[q])) {
+                is_float = 1;
+                while (pos < q) advance();
+                while (pos < code_len && isdigit(code[pos])) advance();
             }
+        }
+        char numbuf[128];
+        int num_len = pos - num_start;
+        if (num_len > (int)sizeof(numbuf) - 1) num_len = (int)sizeof(numbuf) - 1;
+        memcpy(numbuf, code + num_start, (size_t)num_len);
+        numbuf[num_len] = '\0';
+        double value = strtod(numbuf, NULL);
+
+        if (!is_float && value <= 2147483647.0 + (sign < 0 ? 1.0 : 0.0)) {
+            current_token.type = TOK_INT;
+            current_token.int_val = (sign < 0) ? (int)(-value) : (int)value;
+        } else {
             current_token.type = TOK_FLOAT;
             current_token.float_val = sign * value;
-        } else {
-            current_token.type = TOK_INT;
-            current_token.int_val = sign * (int)value;
         }
         return;
     }
@@ -292,6 +374,9 @@ static void scan_token(void) {
             char ch = code[pos];
             if (ch == '\\' && pos + 1 < code_len) {
                 advance();
+                if ((code[pos] == 'u' || code[pos] == 'x') && lex_unicode_escape(&sb)) {
+                    continue;
+                }
                 switch (code[pos]) {
                     case 'n': ch = '\n'; break;
                     case 't': ch = '\t'; break;

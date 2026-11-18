@@ -1,14 +1,14 @@
 #include "eval.h"
 
 #include <stdio.h>
+#include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "../builtin/builtin.h"
-#include "../builtin/db_builtin.h"
 #include "../builtin/extended_builtin.h"
-#include "../builtin/security_builtin.h"
-#include "../builtin/time_builtin.h"
+#include "../builtin/registry.h"
 #include "../core/interpreter.h"
 #include "../net/http.h"
 #include "../parser/parser.h"
@@ -102,7 +102,7 @@ int call_nac_function(const char *name, Value *args, int arg_count, Value *out_r
         return 1;
     }
 
-    call_stack_vars[call_depth] = create_var_table();
+    call_stack_vars[call_depth] = create_local_var_table();
     call_depth++;
 
     for (int i = 0; i < func->param_count; i++) {
@@ -146,7 +146,7 @@ int call_func_value(Value fn, Value *args, int arg_count, Value *out_result) {
         return 1;
     }
 
-    call_stack_vars[call_depth] = create_var_table();
+    call_stack_vars[call_depth] = create_local_var_table();
     call_depth++;
 
     for (int i = 0; i < func->param_count; i++) {
@@ -174,6 +174,13 @@ int call_func_value(Value fn, Value *args, int arg_count, Value *out_result) {
 
 /* Shared by AST_BINARY_OP and compound assignment (+=, -=, *=, /=) so both
  * paths get identical semantics (e.g. string concatenation on '+'). */
+/* NaC integers are 32-bit: a result that does not fit becomes a float
+ * instead of silently wrapping around. */
+static Value int_result(long long v) {
+    if (v > INT_MAX || v < INT_MIN) return make_float((double)v);
+    return make_int((int)v);
+}
+
 static Value apply_arith_op(NaCTokenType op, Value left, Value right) {
     switch (op) {
         case TOK_PLUS:
@@ -207,19 +214,19 @@ static Value apply_arith_op(NaCTokenType op, Value left, Value right) {
             if (left.type == TYPE_FLOAT || right.type == TYPE_FLOAT) {
                 return make_float(to_float(left) + to_float(right));
             }
-            return make_int(to_int(left) + to_int(right));
+            return int_result((long long)to_int(left) + (long long)to_int(right));
 
         case TOK_MINUS:
             if (left.type == TYPE_FLOAT || right.type == TYPE_FLOAT) {
                 return make_float(to_float(left) - to_float(right));
             }
-            return make_int(to_int(left) - to_int(right));
+            return int_result((long long)to_int(left) - (long long)to_int(right));
 
         case TOK_STAR:
             if (left.type == TYPE_FLOAT || right.type == TYPE_FLOAT) {
                 return make_float(to_float(left) * to_float(right));
             }
-            return make_int(to_int(left) * to_int(right));
+            return int_result((long long)to_int(left) * (long long)to_int(right));
 
         case TOK_SLASH:
             if (to_float(right) == 0) {
@@ -229,7 +236,7 @@ static Value apply_arith_op(NaCTokenType op, Value left, Value right) {
             if (left.type == TYPE_FLOAT || right.type == TYPE_FLOAT) {
                 return make_float(to_float(left) / to_float(right));
             }
-            return make_int(to_int(left) / to_int(right));
+            return int_result((long long)to_int(left) / (long long)to_int(right));
 
         default:
             report_error("Unknown compound assignment operator");
@@ -286,6 +293,11 @@ static Value *lvalue_ptr(ASTNode *n) {
 Value eval_node(ASTNode *node) {
     if (!node) return make_int(0);
 
+    if (node->line > 0) {
+        nac_eval_line = node->line;
+        nac_eval_col = node->col;
+    }
+
     switch (node->type) {
         case AST_INT_LITERAL:
             return make_int(node->int_val);
@@ -303,7 +315,8 @@ Value eval_node(ASTNode *node) {
             return make_string(node->str_val);
 
         case AST_VARIABLE: {
-            Value *v = get_var(node->var_name);
+            if (!node->name_hash) node->name_hash = hash(node->var_name);
+            Value *v = get_var_h(node->var_name, node->name_hash);
             if (!v && find_function(node->var_name)) {
                 /* `callback: onDone` -- a declared function used as a value */
                 return make_func(node->var_name);
@@ -336,8 +349,17 @@ Value eval_node(ASTNode *node) {
                     break;
 
                 case TOK_PERCENT:
-                    if (to_int(right) == 0) {
+                    if (left.type == TYPE_FLOAT || right.type == TYPE_FLOAT) {
+                        if (to_float(right) == 0) {
+                            report_error("Modulo by zero");
+                            result = make_int(0);
+                        } else {
+                            result = make_float(fmod(to_float(left), to_float(right)));
+                        }
+                    } else if (to_int(right) == 0) {
                         report_error("Modulo by zero");
+                        result = make_int(0);
+                    } else if (to_int(right) == -1) {
                         result = make_int(0);
                     } else {
                         result = make_int(to_int(left) % to_int(right));
@@ -451,7 +473,8 @@ Value eval_node(ASTNode *node) {
             Value val = eval_node(node->assign.value);
 
             if (node->assign.compound_op != TOK_EOF) {
-                Value *current = get_var(node->assign.var_name);
+                if (!node->name_hash) node->name_hash = hash(node->assign.var_name);
+                Value *current = get_var_h(node->assign.var_name, node->name_hash);
                 if (!current) {
                     char msg[256];
                     snprintf(msg, sizeof(msg), "Undefined variable: %s", node->assign.var_name);
@@ -471,7 +494,8 @@ Value eval_node(ASTNode *node) {
 
             /* set_var() copies before releasing the old value, so
              * `a = a[0]` / `a = a.child` stays safe without an extra copy. */
-            set_var(node->assign.var_name, val);
+            if (!node->name_hash) node->name_hash = hash(node->assign.var_name);
+            set_var_h(node->assign.var_name, node->name_hash, val);
             return val;
         }
 
@@ -526,15 +550,19 @@ Value eval_node(ASTNode *node) {
             /* f(x) where `f` is a variable holding a function value
              * (f = fn(x) { ... }  /  f = someDeclaredFn): call what it
              * refers to. */
-            char target_name[MAX_TOKEN_LEN];
-            strncpy(target_name, node->call.func_name, MAX_TOKEN_LEN - 1);
-            target_name[MAX_TOKEN_LEN - 1] = '\0';
+            char target_buf[MAX_TOKEN_LEN];
+            const char *target_name = node->call.func_name;
             bool via_variable = false;
             {
                 Value *fv = get_var(node->call.func_name);
                 if (fv && fv->type == TYPE_FUNC) {
-                    strncpy(target_name, fv->str_val, MAX_TOKEN_LEN - 1);
-                    target_name[MAX_TOKEN_LEN - 1] = '\0';
+                    /* the variable may be reassigned while arguments are
+                     * evaluated, so keep a private copy of the name */
+                    size_t n = strlen(fv->str_val);
+                    if (n > MAX_TOKEN_LEN - 1) n = MAX_TOKEN_LEN - 1;
+                    memcpy(target_buf, fv->str_val, n);
+                    target_buf[n] = '\0';
+                    target_name = target_buf;
                     via_variable = true;
                 }
             }
@@ -548,10 +576,12 @@ Value eval_node(ASTNode *node) {
                 }
             }
 
-            bool is_mutating_array_call =
+            Function *cached = via_variable ? NULL : (Function*)node->call.cached_func;
+
+            bool is_mutating_array_call = !cached &&
+                node->call.arg_count > 0 && node->call.args[0]->type == AST_VARIABLE &&
                 (strcmp(node->call.func_name, "push") == 0 || strcmp(node->call.func_name, "pop") == 0 ||
-                 strcmp(node->call.func_name, "removeAt") == 0 || strcmp(node->call.func_name, "delete") == 0) &&
-                node->call.arg_count > 0 && node->call.args[0]->type == AST_VARIABLE;
+                 strcmp(node->call.func_name, "removeAt") == 0 || strcmp(node->call.func_name, "delete") == 0);
 
             for (int i = 0; i < node->call.arg_count; i++) {
                 if (i == 0 && is_mutating_array_call) {
@@ -572,49 +602,24 @@ Value eval_node(ASTNode *node) {
                 return make_null();
             }
 
-            if (!via_variable && is_builtin_function(node->call.func_name)) {
-                Value result = call_builtin_function(node->call.func_name, arg_values, node->call.arg_count);
-
-                if (is_mutating_array_call) {
-                    set_var(node->call.args[0]->var_name, arg_values[0]);
-                    free_value(&arg_values[0]);
-                    arg_values[0] = make_null();
+            if (!cached && !via_variable) {
+                Value result;
+                NacBuiltinKind kind = nac_builtin_dispatch(node->call.func_name, arg_values,
+                                                           node->call.arg_count, &result);
+                if (kind != NAC_BUILTIN_NONE) {
+                    if (kind == NAC_BUILTIN_CORE && is_mutating_array_call) {
+                        set_var(node->call.args[0]->var_name, arg_values[0]);
+                        free_value(&arg_values[0]);
+                        arg_values[0] = make_null();
+                    }
+                    free_value_args(arg_values, node->call.arg_count);
+                    free(arg_values);
+                    return result;
                 }
-
-                free_value_args(arg_values, node->call.arg_count);
-                free(arg_values);
-                return result;
             }
 
-            if (!via_variable && is_extended_builtin(node->call.func_name)) {
-                Value result = call_extended_builtin(node->call.func_name, arg_values, node->call.arg_count);
-                free_value_args(arg_values, node->call.arg_count);
-                free(arg_values);
-                return result;
-            }
-
-            if (!via_variable && is_security_builtin(node->call.func_name)) {
-                Value result = call_security_builtin(node->call.func_name, arg_values, node->call.arg_count);
-                free_value_args(arg_values, node->call.arg_count);
-                free(arg_values);
-                return result;
-            }
-
-            if (!via_variable && is_time_builtin(node->call.func_name)) {
-                Value result = call_time_builtin(node->call.func_name, arg_values, node->call.arg_count);
-                free_value_args(arg_values, node->call.arg_count);
-                free(arg_values);
-                return result;
-            }
-
-            if (!via_variable && is_db_builtin(node->call.func_name)) {
-                Value result = call_db_builtin(node->call.func_name, arg_values, node->call.arg_count);
-                free_value_args(arg_values, node->call.arg_count);
-                free(arg_values);
-                return result;
-            }
-
-            Function *func = find_function(target_name);
+            Function *func = cached ? cached : find_function(target_name);
+            if (func && !via_variable) node->call.cached_func = func;
 
             if (!func) {
                 char msg[256];
@@ -639,7 +644,7 @@ Value eval_node(ASTNode *node) {
                 return make_int(0);
             }
 
-            call_stack_vars[call_depth] = create_var_table();
+            call_stack_vars[call_depth] = create_local_var_table();
             call_depth++;
 
             for (int i = 0; i < func->param_count; i++) {
@@ -716,7 +721,14 @@ Value eval_node(ASTNode *node) {
                 return make_null();
             }
             free_value(&return_value);
-            return_value = copy_value(val);
+            if ((val.type == TYPE_STRING || val.type == TYPE_FUNC) && !val.owned && val.str_val) {
+                /* A borrowed string points into a variable of the function
+                 * that is about to return; give the caller its own copy. */
+                return_value = make_string(val.str_val);
+                return_value.type = val.type;
+            } else {
+                return_value = copy_value(val);
+            }
             free_value(&val);
             should_return = true;
             return return_value;

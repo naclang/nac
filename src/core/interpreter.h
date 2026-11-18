@@ -29,6 +29,8 @@ extern bool should_continue;
 extern bool should_return;
 extern Value return_value;
 
+extern int nac_eval_line;
+extern int nac_eval_col;
 extern bool error_occurred;
 extern int error_count;
 extern bool nac_test_mode;

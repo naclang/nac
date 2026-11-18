@@ -1,19 +1,19 @@
-// examples/web/12_sqlite_todos.nac -- SQLite ile kalici todo API'si
+// examples/web/12_sqlite_todos.nac -- a todo API persisted in SQLite
 //
-// 02_json_api.nac ile ayni API, ama veri bellekte degil todos.db dosyasinda:
-// sunucuyu yeniden baslatinca kayitlar kaybolmaz.
-// (SQLite destekli bir NaC derlemesi gerekir, bkz. README.)
+// The same API as 02_json_api.nac, but the data lives in todos.db instead of
+// memory, so records survive a server restart.
+// (Needs a NaC build with SQLite, see the README.)
 //
-// Calistir:  ./nac examples/web/12_sqlite_todos.nac
-// Dene:
-//   curl -X POST -d '{"title":"sut al"}' http://localhost:8080/todos
+// Run:  ./nac examples/web/12_sqlite_todos.nac
+// Try:
+//   curl -X POST -d '{"title":"buy milk"}' http://localhost:8080/todos
 //   curl http://localhost:8080/todos
 //   curl "http://localhost:8080/todos?done=true"
 //   curl -X PATCH http://localhost:8080/todos/1/done
 //   curl -X DELETE http://localhost:8080/todos/1
-//   curl -X POST -d 'bozuk' http://localhost:8080/todos      (400 doner)
+//   curl -X POST -d 'broken' http://localhost:8080/todos      (returns 400)
 //
-// Degerleri SQL metnine yapistirma: her zaman "?" ile (ya da :ad ile) ver.
+// Do not paste values into SQL text: always use "?" (or :name) parameters.
 
 db = dbOpen(env("TODO_DB", "todos.db"))
 dbExec(db, "CREATE TABLE IF NOT EXISTS todos (
@@ -33,7 +33,7 @@ route GET "/todos" {
 
 route GET "/todos/:id" {
     todo = dbGet(db, "SELECT id, title, done FROM todos WHERE id = ?", [toInt(params.id)])
-    if isNull(todo) { return json({ error: "bulunamadi" }, 404) }
+    if isNull(todo) { return json({ error: "not found" }, 404) }
     return json(todo)
 }
 
@@ -41,10 +41,10 @@ route POST "/todos" {
     try {
         data = jsonParse(body)
     } catch e {
-        return json({ error: "gecersiz JSON" }, 400)
+        return json({ error: "invalid JSON" }, 400)
     }
     if type(data) != "map" or not ("title" in data) {
-        return json({ error: "title gerekli" }, 400)
+        return json({ error: "title required" }, 400)
     }
     result = dbExec(db, "INSERT INTO todos (title) VALUES (:title)", { title: data.title })
     return json(dbGet(db, "SELECT id, title, done FROM todos WHERE id = ?", [result.lastId]), 201)
@@ -52,13 +52,13 @@ route POST "/todos" {
 
 route PATCH "/todos/:id/done" {
     result = dbExec(db, "UPDATE todos SET done = 1 WHERE id = ?", [toInt(params.id)])
-    if result.changes == 0 { return json({ error: "bulunamadi" }, 404) }
+    if result.changes == 0 { return json({ error: "not found" }, 404) }
     return json(dbGet(db, "SELECT id, title, done FROM todos WHERE id = ?", [toInt(params.id)]))
 }
 
 route DELETE "/todos/:id" {
     result = dbExec(db, "DELETE FROM todos WHERE id = ?", [toInt(params.id)])
-    if result.changes == 0 { return json({ error: "bulunamadi" }, 404) }
+    if result.changes == 0 { return json({ error: "not found" }, 404) }
     return json({ deleted: toInt(params.id) })
 }
 

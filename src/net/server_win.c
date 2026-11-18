@@ -17,7 +17,6 @@
 #include "server_common.h"
 
 #define REQ_BUFFER_SIZE 65536
-#define RESP_BUFFER_SIZE (MAX_STRING_LEN + 8192)
 #define MAX_HANDLER_NAME_LEN 256
 #define MAX_REQUESTS_PER_CONN 1000
 #define MAX_KEEPALIVE_IDLE_MS 5000
@@ -156,11 +155,9 @@ static DWORD WINAPI handle_connection(LPVOID arg) {
     client_ip[sizeof(client_ip) - 1] = '\0';
     free(ca);
 
-    char *raw = (char*)malloc(REQ_BUFFER_SIZE);
-    char *resp = (char*)malloc(RESP_BUFFER_SIZE);
-    if (!raw || !resp) {
-        free(raw);
-        free(resp);
+    size_t raw_cap = REQ_BUFFER_SIZE;
+    char *raw = (char*)malloc(raw_cap);
+    if (!raw) {
         closesocket(client_fd);
         release_connection_slot();
         return 0;
@@ -202,7 +199,7 @@ static DWORD WINAPI handle_connection(LPVOID arg) {
             if ((int)buffered >= nac_cfg.max_header_bytes) break;
 
             int n = recv_deadline(client_fd, raw + buffered,
-                                  (int)(REQ_BUFFER_SIZE - 1 - buffered), deadline);
+                                  (int)(raw_cap - 1 - buffered), deadline);
             if (n == -2) {
                 if (buffered == 0) silent_close = 1;
                 else early_status = 408;
@@ -252,8 +249,10 @@ static DWORD WINAPI handle_connection(LPVOID arg) {
             break;
         }
         if (req.content_length > NAC_MAX_BODY_BYTES) {
-            send_http_error(client_fd, 413,
-                            "413 Payload Too Large (request body limit is 8191 bytes)");
+            char too_big[128];
+            snprintf(too_big, sizeof(too_big),
+                     "413 Payload Too Large (request body limit is %d bytes)", NAC_MAX_BODY_BYTES);
+            send_http_error(client_fd, 413, too_big);
             nac_http_free_request(&req);
             break;
         }
@@ -269,10 +268,21 @@ static DWORD WINAPI handle_connection(LPVOID arg) {
         }
 
         int want = req.content_length;
+    if ((size_t)header_end + (size_t)want + 1 > raw_cap) {
+        size_t need = (size_t)header_end + (size_t)want + 1;
+        char *grown = (char*)realloc(raw, need);
+        if (!grown) {
+            send_http_error(client_fd, 500, "500 Internal Server Error");
+            nac_http_free_request(&req);
+            break;
+        }
+        raw = grown;
+        raw_cap = need;
+    }
         int body_error = 0;
         while ((int)buffered - header_end < want) {
             int n = recv_deadline(client_fd, raw + buffered,
-                                  (int)(REQ_BUFFER_SIZE - 1 - buffered), deadline);
+                                  (int)(raw_cap - 1 - buffered), deadline);
             if (n == -2) {
                 body_error = 408;
                 break;
@@ -294,12 +304,7 @@ static DWORD WINAPI handle_connection(LPVOID arg) {
 
         int body_available = (int)buffered - header_end;
         if (body_available > want) body_available = want;
-        if (body_available > 0) {
-            int copy_len = body_available;
-            if (copy_len >= MAX_STRING_LEN) copy_len = MAX_STRING_LEN - 1;
-            memcpy(req.body, raw + header_end, (size_t)copy_len);
-            req.body[copy_len] = '\0';
-        }
+        if (body_available > 0) nac_http_set_body(&req, raw + header_end, body_available);
 
         int keep_alive = !g_shutdown_requested &&
                          served + 1 < MAX_REQUESTS_PER_CONN &&
@@ -318,15 +323,17 @@ static DWORD WINAPI handle_connection(LPVOID arg) {
             sent_ok = send_all(client_fd, raw_resp, raw_len);
             free(raw_resp);
         } else {
-            int resp_len = nac_http_build_response(1, handler_name, result, keep_alive,
-                                                   strcmp(req.method, "HEAD") == 0,
-                                                   resp, RESP_BUFFER_SIZE, &status);
-            if (resp_len > 0) {
+            int resp_len = 0;
+            char *resp = nac_http_build_response_alloc(1, handler_name, result, keep_alive,
+                                                       strcmp(req.method, "HEAD") == 0,
+                                                       &resp_len, &status);
+            if (resp && resp_len > 0) {
                 sent_ok = send_all(client_fd, resp, resp_len);
             } else {
                 send_http_error(client_fd, 500, "500 Internal Server Error");
                 sent_ok = 0;
             }
+            free(resp);
             free_value(&result);
         }
 
@@ -345,6 +352,13 @@ static DWORD WINAPI handle_connection(LPVOID arg) {
             buffered = leftover;
         }
         raw[buffered] = '\0';
+        if (raw_cap > REQ_BUFFER_SIZE && buffered < REQ_BUFFER_SIZE) {
+            char *small = (char*)realloc(raw, REQ_BUFFER_SIZE);
+            if (small) {
+                raw = small;
+                raw_cap = REQ_BUFFER_SIZE;
+            }
+        }
         served++;
 
         if (!sent_ok || !keep_alive || g_shutdown_requested) break;
@@ -352,7 +366,6 @@ static DWORD WINAPI handle_connection(LPVOID arg) {
 
     closesocket(client_fd);
     free(raw);
-    free(resp);
 
     release_connection_slot();
     return 0;

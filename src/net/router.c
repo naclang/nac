@@ -169,6 +169,12 @@ int router_match(const char *method, const char *path, char *fn_out, int fn_cap,
         *params = tmp;
         return 1;
     }
+
+    /* HEAD is GET without the body: answer it from the GET route when the
+     * script declares no HEAD route of its own. */
+    if (strcmp(method, "HEAD") == 0) {
+        return router_match("GET", path, fn_out, fn_cap, params, path_matched);
+    }
     return 0;
 }
 

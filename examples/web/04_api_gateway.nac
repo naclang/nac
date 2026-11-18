@@ -1,9 +1,9 @@
-// examples/web/04_api_gateway.nac -- baska bir API'yi cagiran route (internet gerekir)
+// examples/web/04_api_gateway.nac -- a route that calls another API (needs internet)
 //
-// Calistir:  ./nac examples/web/04_api_gateway.nac
-// Dene:      curl http://localhost:8080/ip
+// Run:  ./nac examples/web/04_api_gateway.nac
+// Try:      curl http://localhost:8080/ip
 //
-// Dis servis cevap vermezse sunucu cokmez: 502 doner.
+// If the upstream service fails the server keeps running and returns 502.
 
 fn logUpstream(r) {
     print("upstream:", r.status, r.error or "")

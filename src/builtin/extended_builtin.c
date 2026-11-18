@@ -16,6 +16,7 @@
 #include "../runtime/eval.h"
 #include "../runtime/json.h"
 #include "../util/error.h"
+#include "../util/strutil.h"
 
 #define HTTP_DEFAULT_TIMEOUT_SEC 30
 
@@ -190,11 +191,19 @@ static void decode_url_component(const char *in, char *out, size_t out_cap) {
     out[oi] = '\0';
 }
 
-static char *nac_strdup(const char *s) {
-    size_t n = strlen(s) + 1;
-    char *copy = (char*)malloc(n);
-    if (copy) memcpy(copy, s, n);
-    return copy;
+/* A value rendered the way print() shows it, as an owned string Value of any
+ * length. Strings are copied as they are; other values go through a 4 KiB
+ * scratch buffer and, if that may have truncated, an 8 MiB heap buffer. */
+static Value display_value_alloc(Value v) {
+    if (v.type == TYPE_STRING) return make_string(v.str_val);
+    char small[4096];
+    value_to_display_string(v, small, sizeof(small));
+    if (strlen(small) < sizeof(small) - 1) return make_string(small);
+    size_t cap = 8 * 1024 * 1024;
+    char *big = (char*)malloc(cap);
+    if (!big) return make_string(small);
+    value_to_display_string(v, big, cap);
+    return make_string_take(big);
 }
 
 static Value parse_form_encoded(const char *raw) {
@@ -213,32 +222,51 @@ static Value parse_form_encoded(const char *raw) {
     for (char *pair = strtok(copy, "&"); pair; pair = strtok(NULL, "&")) {
         char *eq = strchr(pair, '=');
         if (!eq) {
-            char key[MAX_STRING_LEN];
-            decode_url_component(pair, key, sizeof(key));
+            char *key = (char*)malloc(strlen(pair) + 1);
+            if (!key) continue;
+            decode_url_component(pair, key, strlen(pair) + 1);
             map_set(&form, key, make_string(""));
+            free(key);
             continue;
         }
         *eq = '\0';
-        char key[MAX_STRING_LEN];
-        char value[MAX_STRING_LEN];
-        decode_url_component(pair, key, sizeof(key));
-        decode_url_component(eq + 1, value, sizeof(value));
-        map_set(&form, key, make_string(value));
+        char *key = (char*)malloc(strlen(pair) + 1);
+        char *value = (char*)malloc(strlen(eq + 1) + 1);
+        if (key && value) {
+            decode_url_component(pair, key, strlen(pair) + 1);
+            decode_url_component(eq + 1, value, strlen(eq + 1) + 1);
+            map_set(&form, key, make_string(value));
+        }
+        free(key);
+        free(value);
     }
 
     free(copy);
     return form;
 }
 
-static int append_template_text(char *out, size_t *used, const char *text, size_t len) {
-    if (*used + len >= MAX_STRING_LEN) return 0;
-    memcpy(out + *used, text, len);
-    *used += len;
-    out[*used] = '\0';
+typedef struct {
+    char *data;
+    size_t used;
+    size_t cap;
+} TplOut;
+
+static int append_template_text(TplOut *o, const char *text, size_t len) {
+    if (o->used + len + 1 > o->cap) {
+        size_t nc = o->cap ? o->cap : 256;
+        while (nc < o->used + len + 1) nc *= 2;
+        char *grown = (char*)realloc(o->data, nc);
+        if (!grown) return 0;
+        o->data = grown;
+        o->cap = nc;
+    }
+    if (len) memcpy(o->data + o->used, text, len);
+    o->used += len;
+    o->data[o->used] = '\0';
     return 1;
 }
 
-static int append_html_escaped(char *out, size_t *used, const char *text) {
+static int append_html_escaped(TplOut *o, const char *text) {
     for (const char *p = text; *p; p++) {
         const char *escaped = NULL;
         switch (*p) {
@@ -248,10 +276,10 @@ static int append_html_escaped(char *out, size_t *used, const char *text) {
             case '"': escaped = "&quot;"; break;
             case '\'': escaped = "&#39;"; break;
             default:
-                if (!append_template_text(out, used, p, 1)) return 0;
+                if (!append_template_text(o, p, 1)) return 0;
                 continue;
         }
-        if (!append_template_text(out, used, escaped, strlen(escaped))) return 0;
+        if (!append_template_text(o, escaped, strlen(escaped))) return 0;
     }
     return 1;
 }
@@ -275,9 +303,9 @@ static Value render_template(const char *path, Value data) {
         return make_null();
     }
     long file_size = ftell(file);
-    if (file_size < 0 || file_size >= MAX_STRING_LEN) {
+    if (file_size < 0) {
         fclose(file);
-        report_error("render(): template exceeds the 8191-byte limit");
+        report_error("render(): could not read template");
         return make_null();
     }
     rewind(file);
@@ -298,27 +326,19 @@ static Value render_template(const char *path, Value data) {
     }
     source[read_size] = '\0';
 
-    char output[MAX_STRING_LEN] = "";
-    size_t used = 0;
+    TplOut output = {0};
     const char *cursor = source;
     while (*cursor) {
         const char *open = strstr(cursor, "{{");
         if (!open) {
-            if (!append_template_text(output, &used, cursor, strlen(cursor))) {
-                free(source);
-                report_error("render(): rendered output exceeds the 8191-byte limit");
-                return make_null();
-            }
+            if (!append_template_text(&output, cursor, strlen(cursor))) goto oom;
             break;
         }
-        if (!append_template_text(output, &used, cursor, (size_t)(open - cursor))) {
-            free(source);
-            report_error("render(): rendered output exceeds the 8191-byte limit");
-            return make_null();
-        }
+        if (!append_template_text(&output, cursor, (size_t)(open - cursor))) goto oom;
         const char *close = strstr(open + 2, "}}");
         if (!close) {
             free(source);
+            free(output.data);
             report_error("render(): unclosed {{ placeholder");
             return make_null();
         }
@@ -329,6 +349,7 @@ static Value render_template(const char *path, Value data) {
         size_t key_len = (size_t)(key_end - key_start);
         if (key_len == 0 || key_len >= MAX_TOKEN_LEN) {
             free(source);
+            free(output.data);
             report_error("render(): invalid template placeholder");
             return make_null();
         }
@@ -340,28 +361,32 @@ static Value render_template(const char *path, Value data) {
             char msg[256];
             snprintf(msg, sizeof(msg), "render(): missing template value '%s'", key);
             free(source);
+            free(output.data);
             report_error(msg);
             return make_null();
         }
-        char text[MAX_STRING_LEN];
-        value_to_display_string(*value, text, sizeof(text));
-        if (!append_html_escaped(output, &used, text)) {
-            free(source);
-            report_error("render(): rendered output exceeds the 8191-byte limit");
-            return make_null();
-        }
+        Value text = display_value_alloc(*value);
+        int ok = append_html_escaped(&output, text.str_val);
+        free_value(&text);
+        if (!ok) goto oom;
         cursor = close + 2;
     }
     free(source);
 
     Value response = make_map();
     map_set(&response, "status", make_int(200));
-    map_set(&response, "body", make_string(output));
+    map_set(&response, "body", output.data ? make_string_take(output.data) : make_string(""));
     Value headers = make_map();
     map_set(&headers, "content-type", make_string("text/html; charset=utf-8"));
     map_set(&response, "headers", headers);
     free_value(&headers);
     return response;
+
+oom:
+    free(source);
+    free(output.data);
+    report_error("render(): out of memory");
+    return make_null();
 }
 
 static Value normalize_test_response(Value result) {
@@ -378,11 +403,9 @@ static Value normalize_test_response(Value result) {
         free_value(&headers);
         return response;
     }
-    char body[MAX_STRING_LEN];
-    value_to_display_string(result, body, sizeof(body));
     Value response = make_map();
     map_set(&response, "status", make_int(200));
-    map_set(&response, "body", make_string(body));
+    map_set(&response, "body", display_value_alloc(result));
     map_set(&response, "headers", make_map());
     return response;
 }
@@ -416,8 +439,9 @@ static Value test_request(Value *args, int arg_count) {
             map_set(&req.headers, lower_key, args[3].map_val.values[i]);
         }
     }
+    req.body = (char*)calloc(1, 1);
     if (arg_count >= 3) {
-        strncpy(req.body, args[2].str_val, sizeof(req.body) - 1);
+        nac_http_set_body(&req, args[2].str_val, (int)strlen(args[2].str_val));
     }
     strcpy(req.client_ip, "127.0.0.1");
 
@@ -473,6 +497,7 @@ static Value test_request(Value *args, int arg_count) {
     free_value(&req.query);
     free_value(&req.headers);
     free_value(&req.cookie);
+    free(req.body);
     return response;
 }
 
@@ -607,9 +632,7 @@ Value call_extended_builtin(const char *name, Value *args, int arg_count) {
             if (js) free(js);
             map_set(&hdrs, "content-type", make_string("application/json"));
         } else {
-            char text[MAX_STRING_LEN];
-            value_to_display_string(args[0], text, sizeof(text));
-            map_set(&resp, "body", make_string(text));
+            map_set(&resp, "body", display_value_alloc(args[0]));
             map_set(&hdrs, "content-type", make_string("text/html; charset=utf-8"));
         }
         map_set(&resp, "headers", hdrs);

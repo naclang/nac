@@ -1,0 +1,63 @@
+// 04 - Arrays
+//
+// Run:  nac examples/basics/04_arrays.nac
+
+nums = [23, 45, 5, 12, 78, 34, 90, 56]
+print("length:", len(nums), " first:", nums[0], " last:", nums[len(nums) - 1])
+
+// Add and remove
+push(nums, 7)
+print(nums)
+removed = removeAt(nums, 0)
+print("removed:", removed)
+
+// Sum and maximum
+fn array_sum(arr) {
+    sum_total = 0
+    for value in arr {
+        sum_total += value
+    }
+    return sum_total
+}
+
+fn find_max(arr) {
+    best = arr[0]
+    for idx in range(1, len(arr)) {
+        if arr[idx] > best {
+            best = arr[idx]
+        }
+    }
+    return best
+}
+
+print("sum:", array_sum(nums))
+print("max:", find_max(nums))
+
+// Sorting by hand: bubble sort
+fn bubble_sort(arr) {
+    size = len(arr)
+    for outer in range(size - 1) {
+        for inner in range(size - outer - 1) {
+            if arr[inner] > arr[inner + 1] {
+                temp = arr[inner]
+                arr[inner] = arr[inner + 1]
+                arr[inner + 1] = temp
+            }
+        }
+    }
+    return arr
+}
+
+unsorted = [64, 34, 25, 12, 22, 11, 90]
+print("sorted:", join(bubble_sort(unsorted), ", "))
+
+// Element assignment, nested arrays, and membership
+grid = [[1, 2], [3, 4]]
+grid[1][0] = 30
+grid[0][1] += 100
+print(grid[0][1], grid[1][0])
+print(2 in [1, 2, 3], 9 in [1, 2, 3])
+
+// Handy helpers
+letters = [5, 3, 8, 1, 9]
+print(first(letters), last(letters), join(reverse(letters), ","), join(slice(letters, 1, 4), ","))

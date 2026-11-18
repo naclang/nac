@@ -1,27 +1,27 @@
-// examples/web/01_hello.nac -- en kucuk sunucu
+// examples/web/01_hello.nac -- the smallest server
 //
-// Calistir:  ./nac examples/web/01_hello.nac
-// Dene:      curl http://localhost:8080/
-//            curl "http://localhost:8080/hello?name=Ayse"
+// Run:  ./nac examples/web/01_hello.nac
+// Try:      curl http://localhost:8080/
+//            curl "http://localhost:8080/hello?name=Alice"
 //            curl http://localhost:8080/users/2
 
 users = ["Ada", "Turing", "Grace"]
 
 route GET "/" {
-    return "NaC web sunucusuna hos geldiniz!"
+    return "Welcome to the NaC web server!"
 }
 
-// ?name=... sorgu parametresi (query bir map'tir)
+// ?name=... query parameter (query is a map)
 route GET "/hello" {
-    name = query.name or "Dunya"
-    return `Merhaba, ${name}!`
+    name = query.name or "World"
+    return `Hello, ${name}!`
 }
 
-// :id yol parametresi (params bir map'tir)
+// :id path parameter (params is a map)
 route GET "/users/:id" {
     id = toInt(params.id)
     if id < 0 or id >= len(users) {
-        return json({ error: "kullanici yok" }, 404)
+        return json({ error: "user not found" }, 404)
     }
     return json({ id: id, name: users[id] })
 }

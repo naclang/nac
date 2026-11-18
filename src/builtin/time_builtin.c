@@ -15,6 +15,7 @@
 #endif
 
 #include "../util/error.h"
+#include "../util/strutil.h"
 
 /* Calendar arithmetic is done here instead of through strftime()/strptime()/
  * gmtime(): those differ between platforms (Windows has no strptime, its
@@ -112,22 +113,13 @@ static int parse_zone_offset(const char **pp, int *offset) {
     return 1;
 }
 
-static int ci_equal(const char *a, const char *b) {
-    while (*a && *b) {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
-        a++;
-        b++;
-    }
-    return *a == '\0' && *b == '\0';
-}
-
 static int parse_zone_arg(const char *text, Zone *z) {
     memset(z, 0, sizeof(*z));
-    if (ci_equal(text, "utc") || ci_equal(text, "z")) {
+    if (nac_ci_equal(text, "utc") || nac_ci_equal(text, "z")) {
         strcpy(z->label, "UTC");
         return 1;
     }
-    if (ci_equal(text, "local")) {
+    if (nac_ci_equal(text, "local")) {
         z->local = 1;
         return 1;
     }
@@ -438,7 +430,7 @@ static int scan_format(const char **pp, const char *fmt, Parsed *pt) {
                 size_t n = 0;
                 while (isalpha((unsigned char)*p) && n < sizeof(word) - 1) word[n++] = *p++;
                 word[n] = '\0';
-                if (!ci_equal(word, "UTC") && !ci_equal(word, "GMT") && !ci_equal(word, "Z")) return 0;
+                if (!nac_ci_equal(word, "UTC") && !nac_ci_equal(word, "GMT") && !nac_ci_equal(word, "Z")) return 0;
                 pt->offset = 0;
                 break;
             }

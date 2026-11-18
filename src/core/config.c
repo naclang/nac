@@ -6,15 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static char *trim(char *text) {
-    while (*text && isspace((unsigned char)*text)) text++;
-    size_t len = strlen(text);
-    while (len > 0 && isspace((unsigned char)text[len - 1])) {
-        text[--len] = '\0';
-    }
-    return text;
-}
+#include "../util/strutil.h"
 
 static int valid_key(const char *key) {
     if (!key[0] || !(isalpha((unsigned char)key[0]) || key[0] == '_')) return 0;
@@ -25,7 +17,7 @@ static int valid_key(const char *key) {
 }
 
 static int decode_value(char *raw, char *out, size_t out_cap) {
-    raw = trim(raw);
+    raw = nac_trim(raw);
     size_t used = 0;
     if (*raw == '"' || *raw == '\'') {
         char quote = *raw++;
@@ -40,7 +32,7 @@ static int decode_value(char *raw, char *out, size_t out_cap) {
         }
         if (!*end) return 0;
         *end = '\0';
-        char *trailing = trim(end + 1);
+        char *trailing = nac_trim(end + 1);
         if (*trailing && *trailing != '#') return 0;
         for (char *p = raw; *p; p++) {
             char c = *p;
@@ -69,7 +61,7 @@ static int decode_value(char *raw, char *out, size_t out_cap) {
                 break;
             }
         }
-        raw = trim(raw);
+        raw = nac_trim(raw);
         used = strlen(raw);
         if (used >= out_cap) return 0;
         memcpy(out, raw, used);
@@ -117,11 +109,11 @@ int nac_load_dotenv(const char *path, char *error, size_t error_cap) {
             (unsigned char)line[2] == 0xBF) {
             memmove(line, line + 3, len - 2);
         }
-        char *entry = trim(line);
+        char *entry = nac_trim(line);
         if (!*entry || *entry == '#') continue;
         if (strncmp(entry, "export", 6) == 0 &&
             isspace((unsigned char)entry[6])) {
-            entry = trim(entry + 6);
+            entry = nac_trim(entry + 6);
         }
 
         char *equals = strchr(entry, '=');
@@ -133,7 +125,7 @@ int nac_load_dotenv(const char *path, char *error, size_t error_cap) {
             return -1;
         }
         *equals = '\0';
-        char *key = trim(entry);
+        char *key = nac_trim(entry);
         if (!valid_key(key)) {
             if (error && error_cap) {
                 snprintf(error, error_cap, "%s:%d: invalid environment variable name", path, line_number);
@@ -228,23 +220,14 @@ static void set_error(char *error, size_t cap, const char *fmt, const char *a, c
     if (error && cap) snprintf(error, cap, fmt, a, b);
 }
 
-static int ci_equals(const char *a, const char *b) {
-    while (*a && *b) {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
-        a++;
-        b++;
-    }
-    return *a == '\0' && *b == '\0';
-}
-
 static int parse_bool_text(const char *text, int *out) {
-    if (ci_equals(text, "1") || ci_equals(text, "true") || ci_equals(text, "yes") ||
-        ci_equals(text, "on")) {
+    if (nac_ci_equal(text, "1") || nac_ci_equal(text, "true") || nac_ci_equal(text, "yes") ||
+        nac_ci_equal(text, "on")) {
         *out = 1;
         return 1;
     }
-    if (ci_equals(text, "0") || ci_equals(text, "false") || ci_equals(text, "no") ||
-        ci_equals(text, "off") || text[0] == '\0') {
+    if (nac_ci_equal(text, "0") || nac_ci_equal(text, "false") || nac_ci_equal(text, "no") ||
+        nac_ci_equal(text, "off") || text[0] == '\0') {
         *out = 0;
         return 1;
     }

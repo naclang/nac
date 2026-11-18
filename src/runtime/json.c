@@ -100,13 +100,40 @@ static char *parse_json_string_alloc(const char **p) {
                     }
                     if (!ok) { free(sb.data); return NULL; }
                     (*p) += 4;
+                    /* A high surrogate must be followed by \uDC00..\uDFFF; the
+                     * pair is one code point above U+FFFF (emoji, ...). */
+                    if (code >= 0xD800 && code <= 0xDBFF) {
+                        unsigned low = 0;
+                        int low_ok = ((*p)[0] == '\\' && (*p)[1] == 'u');
+                        for (int i = 0; low_ok && i < 4; i++) {
+                            char h = (*p)[2 + i];
+                            low <<= 4;
+                            if (h >= '0' && h <= '9') low |= (unsigned)(h - '0');
+                            else if (h >= 'a' && h <= 'f') low |= (unsigned)(10 + h - 'a');
+                            else if (h >= 'A' && h <= 'F') low |= (unsigned)(10 + h - 'A');
+                            else low_ok = 0;
+                        }
+                        if (low_ok && low >= 0xDC00 && low <= 0xDFFF) {
+                            code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                            (*p) += 6;
+                        } else {
+                            code = 0xFFFD;      /* lone surrogate */
+                        }
+                    } else if (code >= 0xDC00 && code <= 0xDFFF) {
+                        code = 0xFFFD;
+                    }
                     if (code <= 0x7F) {
                         sb_append_char(&sb, (char)code);
                     } else if (code <= 0x7FF) {
                         sb_append_char(&sb, (char)(0xC0 | (code >> 6)));
                         sb_append_char(&sb, (char)(0x80 | (code & 0x3F)));
-                    } else {
+                    } else if (code <= 0xFFFF) {
                         sb_append_char(&sb, (char)(0xE0 | (code >> 12)));
+                        sb_append_char(&sb, (char)(0x80 | ((code >> 6) & 0x3F)));
+                        sb_append_char(&sb, (char)(0x80 | (code & 0x3F)));
+                    } else {
+                        sb_append_char(&sb, (char)(0xF0 | (code >> 18)));
+                        sb_append_char(&sb, (char)(0x80 | ((code >> 12) & 0x3F)));
                         sb_append_char(&sb, (char)(0x80 | ((code >> 6) & 0x3F)));
                         sb_append_char(&sb, (char)(0x80 | (code & 0x3F)));
                     }
@@ -373,14 +400,53 @@ static int parse_value(const char **p, Value *out, int depth) {
     return parse_json_number(p, out);
 }
 
+/* Strict UTF-8 check (no overlong forms, surrogates or values above
+ * U+10FFFF). JSON text must be UTF-8 (RFC 8259); accepting anything else
+ * stores and echoes bytes that other JSON parsers then refuse. Returns the
+ * offset of the first bad byte, or -1 when the text is valid. */
+static long utf8_first_invalid(const unsigned char *s) {
+    const unsigned char *start = s;
+    while (*s) {
+        unsigned char c = *s;
+        int extra;
+        unsigned lowest;
+        unsigned cp;
+        if (c < 0x80) { s++; continue; }
+        else if ((c & 0xE0) == 0xC0) { extra = 1; lowest = 0x80; cp = c & 0x1F; }
+        else if ((c & 0xF0) == 0xE0) { extra = 2; lowest = 0x800; cp = c & 0x0F; }
+        else if ((c & 0xF8) == 0xF0) { extra = 3; lowest = 0x10000; cp = c & 0x07; }
+        else return (long)(s - start);
+
+        for (int i = 1; i <= extra; i++) {
+            if ((s[i] & 0xC0) != 0x80) return (long)(s - start);
+            cp = (cp << 6) | (s[i] & 0x3F);
+        }
+        if (cp < lowest || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+            return (long)(s - start);
+        }
+        s += extra + 1;
+    }
+    return -1;
+}
+
 bool json_parse_value(const char *json, Value *out) {
     if (!json || !out) {
         return false;
     }
 
+    long bad = utf8_first_invalid((const unsigned char*)json);
+    if (bad >= 0) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Invalid JSON: input is not valid UTF-8 (byte %ld)", bad);
+        report_error(msg);
+        return false;
+    }
+
     const char *p = json;
     if (!parse_value(&p, out, 0)) {
-        report_error("Invalid JSON input");
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Invalid JSON input (near byte %d)", (int)(p - json));
+        report_error(msg);
         return false;
     }
 

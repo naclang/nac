@@ -1,13 +1,13 @@
-// examples/web/02_json_api.nac -- bellekte calisan REST API (todo listesi)
+// examples/web/02_json_api.nac -- an in-memory REST API (todo list)
 //
-// Calistir:  ./nac examples/web/02_json_api.nac
-// Dene:
+// Run:  ./nac examples/web/02_json_api.nac
+// Try:
 //   curl http://localhost:8080/todos
-//   curl -X POST -d '{"title":"sut al"}' http://localhost:8080/todos
+//   curl -X POST -d '{"title":"buy milk"}' http://localhost:8080/todos
 //   curl "http://localhost:8080/todos?done=true"
 //   curl -X PATCH http://localhost:8080/todos/1/done
 //   curl -X DELETE http://localhost:8080/todos/1
-//   curl -X POST -d 'bozuk' http://localhost:8080/todos      (400 doner)
+//   curl -X POST -d 'broken' http://localhost:8080/todos      (returns 400)
 
 todos = []
 nextId = 1
@@ -35,7 +35,7 @@ route GET "/todos" {
 
 route GET "/todos/:id" {
     i = findIndex(toInt(params.id))
-    if i < 0 { return json({ error: "bulunamadi" }, 404) }
+    if i < 0 { return json({ error: "not found" }, 404) }
     return json(todos[i])
 }
 
@@ -43,10 +43,10 @@ route POST "/todos" {
     try {
         data = jsonParse(body)
     } catch e {
-        return json({ error: "gecersiz JSON" }, 400)
+        return json({ error: "invalid JSON" }, 400)
     }
     if type(data) != "map" or not ("title" in data) {
-        return json({ error: "title gerekli" }, 400)
+        return json({ error: "title required" }, 400)
     }
     todo = { id: nextId, title: data.title, done: false }
     nextId += 1
@@ -56,14 +56,14 @@ route POST "/todos" {
 
 route PATCH "/todos/:id/done" {
     i = findIndex(toInt(params.id))
-    if i < 0 { return json({ error: "bulunamadi" }, 404) }
+    if i < 0 { return json({ error: "not found" }, 404) }
     todos[i].done = true
     return json(todos[i])
 }
 
 route DELETE "/todos/:id" {
     id = toInt(params.id)
-    if findIndex(id) < 0 { return json({ error: "bulunamadi" }, 404) }
+    if findIndex(id) < 0 { return json({ error: "not found" }, 404) }
     kept = []
     for t in todos {
         if t.id != id { push(kept, t) }

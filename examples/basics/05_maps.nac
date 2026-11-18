@@ -1,0 +1,35 @@
+// 05 - Maps
+//
+// Run:  nac examples/basics/05_maps.nac
+
+// A literal; keys may be written bare or quoted.
+person = { name: "Ada", "age": 36, tags: ["a", "b"], address: { city: "Istanbul" } }
+
+// Read with dots or brackets
+print(`${person.name} / ${person["age"]} / ${person.address.city} / ${person.tags[1]}`)
+
+// Update, including nested values
+person.age += 1
+person.address.city = "Ankara"
+person.tags[0] = "z"
+print(person.age, person.address.city, person.tags[0])
+
+// Keys, membership, iteration
+print(keys(person))
+print("age" in person, "email" in person)
+for key in keys(person) {
+    print("key:", key)
+}
+
+// Remove a key: delete() returns true if it existed
+print(delete(person, "age"), delete(person, "nope"))
+
+// An empty map can be filled later, several keys at once
+m = map()
+m["name", "year", 3.14] = "NaC", 2026, "pi"
+m["count"] = 1
+m["count"] += 1
+for key in m {
+    print(key, "=", m[key])
+}
+print("length:", length(m))

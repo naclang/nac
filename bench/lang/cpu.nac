@@ -1,0 +1,23 @@
+// CPU-bound interpreter benchmark: function calls, locals, loops.
+fn fib(n) {
+    if (n < 2) { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+
+fn loopsum(n) {
+    total = 0
+    i = 0
+    while i < n {
+        total = total + i * 2
+        i = i + 1
+    }
+    return total
+}
+
+t0 = nowMs()
+print(fib(24))
+t1 = nowMs()
+print(loopsum(300000))
+t2 = nowMs()
+print("fib ms: " + (t1 - t0))
+print("loop ms: " + (t2 - t1))

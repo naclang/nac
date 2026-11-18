@@ -10,6 +10,7 @@
 #include "../net/server_common.h"
 #include "../runtime/json.h"
 #include "../util/error.h"
+#include "../util/strutil.h"
 
 #define PASSWORD_SALT_LEN 16
 #define PASSWORD_HASH_LEN 32
@@ -29,15 +30,6 @@ static void hex_encode(const unsigned char *data, size_t len, char *out) {
         out[i * 2 + 1] = hex[data[i] & 0x0f];
     }
     out[len * 2] = '\0';
-}
-
-static int ci_equal(const char *a, const char *b) {
-    while (*a && *b) {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
-        a++;
-        b++;
-    }
-    return *a == '\0' && *b == '\0';
 }
 
 static int has_header_break(const char *s) {
@@ -80,9 +72,9 @@ static int valid_cookie_attr(const char *value) {
 
 static const char *same_site_value(const char *s, int *valid) {
     *valid = 1;
-    if (ci_equal(s, "lax")) return "Lax";
-    if (ci_equal(s, "strict")) return "Strict";
-    if (ci_equal(s, "none")) return "None";
+    if (nac_ci_equal(s, "lax")) return "Lax";
+    if (nac_ci_equal(s, "strict")) return "Strict";
+    if (nac_ci_equal(s, "none")) return "None";
     *valid = 0;
     return NULL;
 }

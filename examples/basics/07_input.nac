@@ -1,0 +1,21 @@
+// 07 - Reading user input
+//
+// Run:  nac examples/basics/07_input.nac
+
+count = int(input("How many numbers will you enter? "))
+
+numbers = []
+for idx in range(count) {
+    push(numbers, int(input("Number " + (idx + 1) + ": ")))
+}
+
+sum_total = 0
+for value in numbers {
+    sum_total += value
+}
+
+if count > 0 {
+    print("Average:", sum_total / count)
+} else {
+    print("No numbers entered.")
+}

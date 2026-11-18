@@ -57,7 +57,8 @@ bool is_builtin_function(const char *name) {
         "typeOf", "toInt", "toFloat", "toString", "isNull",
         "urlEncode", "urlDecode",
         "now", "array", "range", "keys", "values", "sleep",
-        "input", "len", "str", "int", "float", "type", "assert"
+        "input", "len", "str", "int", "float", "type", "assert",
+        "startsWith", "endsWith"
     };
     int builtin_count = sizeof(builtins) / sizeof(builtins[0]);
     for (int i = 0; i < builtin_count; i++) {
@@ -77,6 +78,42 @@ static const char *canonical_builtin(const char *name) {
     if (strcmp(name, "type") == 0) return "typeOf";
     return name;
 }
+
+/* Growable string buffer: string builtins build results of any length. */
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} NacSbuf;
+
+static int sbuf_add(NacSbuf *b, const char *s, size_t n) {
+    if (b->len + n + 1 > b->cap) {
+        size_t nc = b->cap ? b->cap : 64;
+        while (nc < b->len + n + 1) nc *= 2;
+        char *d = (char*)realloc(b->data, nc);
+        if (!d) return 0;
+        b->data = d;
+        b->cap = nc;
+    }
+    if (n) memcpy(b->data + b->len, s, n);
+    b->len += n;
+    b->data[b->len] = '\0';
+    return 1;
+}
+
+static Value sbuf_finish(NacSbuf *b) {
+    if (!b->data) return make_string("");
+    return make_string_take(b->data);
+}
+
+#define SBUF_ADD(buf, s, n) \
+    do { \
+        if (!sbuf_add((buf), (s), (n))) { \
+            free((buf)->data); \
+            report_error("Out of memory"); \
+            return make_string(""); \
+        } \
+    } while (0)
 
 Value call_builtin_function(const char *name, Value *args, int arg_count) {
     name = canonical_builtin(name);
@@ -109,12 +146,27 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             fputs(prompt, stdout);
             fflush(stdout);
         }
-        char *line = (char*)malloc(MAX_STRING_LEN);
+        size_t line_cap = 256, line_len = 0;
+        char *line = (char*)malloc(line_cap);
         if (!line) return make_null();
-        if (!fgets(line, MAX_STRING_LEN, stdin)) {
+        int ch;
+        while ((ch = fgetc(stdin)) != EOF && ch != '\n') {
+            if (line_len + 1 >= line_cap) {
+                line_cap *= 2;
+                char *grown = (char*)realloc(line, line_cap);
+                if (!grown) {
+                    free(line);
+                    return make_null();
+                }
+                line = grown;
+            }
+            line[line_len++] = (char)ch;
+        }
+        if (ch == EOF && line_len == 0) {
             free(line);
             return make_null();
         }
+        line[line_len] = '\0';
         line[strcspn(line, "\r\n")] = '\0';
         Value result = make_string(line);
         free(line);
@@ -243,12 +295,11 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             report_error("upper() requires a string");
             return make_string("");
         }
-        char result[MAX_STRING_LEN];
-        strncpy(result, args[0].str_val, MAX_STRING_LEN - 1);
-        for (int i = 0; result[i]; i++) {
-            result[i] = toupper(result[i]);
+        Value result = make_string(args[0].str_val);
+        for (char *c = result.str_val; *c; c++) {
+            *c = (char)toupper((unsigned char)*c);
         }
-        return make_string(result);
+        return result;
     }
 
     if (strcmp(name, "lower") == 0) {
@@ -260,12 +311,11 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             report_error("lower() requires a string");
             return make_string("");
         }
-        char result[MAX_STRING_LEN];
-        strncpy(result, args[0].str_val, MAX_STRING_LEN - 1);
-        for (int i = 0; result[i]; i++) {
-            result[i] = tolower(result[i]);
+        Value result = make_string(args[0].str_val);
+        for (char *c = result.str_val; *c; c++) {
+            *c = (char)tolower((unsigned char)*c);
         }
-        return make_string(result);
+        return result;
     }
 
     if (strcmp(name, "trim") == 0) {
@@ -283,15 +333,8 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
         int end = strlen(str) - 1;
         while (end >= start && isspace(str[end])) end--;
 
-        char result[MAX_STRING_LEN];
-        if (end < start) {
-            result[0] = '\0';
-        } else {
-            int len = end - start + 1;
-            strncpy(result, str + start, len);
-            result[len] = '\0';
-        }
-        return make_string(result);
+        if (end < start) return make_string("");
+        return make_string_len(str + start, (size_t)(end - start + 1));
     }
 
     if (strcmp(name, "replace") == 0) {
@@ -308,25 +351,20 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
         const char *old_substr = args[1].str_val;
         const char *new_substr = args[2].str_val;
 
-        char result[MAX_STRING_LEN] = "";
-        int old_len = strlen(old_substr);
-        int new_len = strlen(new_substr);
+        size_t old_len = strlen(old_substr);
+        size_t new_len = strlen(new_substr);
+        if (old_len == 0) return make_string(str);
 
+        NacSbuf out = {0};
         const char *p = str;
-        while (*p) {
-            if (strncmp(p, old_substr, old_len) == 0) {
-                strncat(result, new_substr, MAX_STRING_LEN - strlen(result) - 1);
-                p += old_len;
-            } else {
-                int len = strlen(result);
-                if (len < MAX_STRING_LEN - 1) {
-                    result[len] = *p;
-                    result[len + 1] = '\0';
-                }
-                p++;
-            }
+        const char *hit;
+        while ((hit = strstr(p, old_substr)) != NULL) {
+            SBUF_ADD(&out, p, (size_t)(hit - p));
+            SBUF_ADD(&out, new_substr, new_len);
+            p = hit + old_len;
         }
-        return make_string(result);
+        SBUF_ADD(&out, p, strlen(p));
+        return sbuf_finish(&out);
     }
 
     if (strcmp(name, "substr") == 0) {
@@ -352,10 +390,21 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             len = str_len - start;
         }
 
-        char result[MAX_STRING_LEN];
-        strncpy(result, str + start, len);
-        result[len] = '\0';
-        return make_string(result);
+        return make_string_len(str + start, (size_t)len);
+    }
+
+    if (strcmp(name, "startsWith") == 0 || strcmp(name, "endsWith") == 0) {
+        if (arg_count != 2 || args[0].type != TYPE_STRING || args[1].type != TYPE_STRING) {
+            report_error("startsWith()/endsWith() require 2 string arguments (string, text)");
+            return make_bool(0);
+        }
+        size_t str_len = strlen(args[0].str_val);
+        size_t affix_len = strlen(args[1].str_val);
+        if (affix_len > str_len) return make_bool(0);
+        if (name[0] == 's') {
+            return make_bool(strncmp(args[0].str_val, args[1].str_val, affix_len) == 0);
+        }
+        return make_bool(strcmp(args[0].str_val + (str_len - affix_len), args[1].str_val) == 0);
     }
 
     if (strcmp(name, "indexOf") == 0) {
@@ -458,30 +507,29 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             return make_string("");
         }
 
-        char result[MAX_STRING_LEN] = "";
+        NacSbuf out = {0};
         const char *sep = args[1].str_val;
-        int sep_len = strlen(sep);
+        size_t sep_len = strlen(sep);
 
         for (int i = 0; i < args[0].array_val.size; i++) {
-            if (i > 0) {
-                strncat(result, sep, MAX_STRING_LEN - strlen(result) - 1);
-            }
+            if (i > 0) SBUF_ADD(&out, sep, sep_len);
 
             Value elem = args[0].array_val.elements[i];
-            char elem_str[64];
+            char num[64];
+            const char *piece = "";
             if (elem.type == TYPE_INT) {
-                snprintf(elem_str, sizeof(elem_str), "%d", elem.int_val);
+                snprintf(num, sizeof(num), "%d", elem.int_val);
+                piece = num;
             } else if (elem.type == TYPE_FLOAT) {
-                nac_format_double(elem.float_val, elem_str, sizeof(elem_str));
+                nac_format_double(elem.float_val, num, sizeof(num));
+                piece = num;
             } else if (elem.type == TYPE_STRING) {
-                strncpy(elem_str, elem.str_val, sizeof(elem_str) - 1);
-            } else {
-                elem_str[0] = '\0';
+                piece = elem.str_val;
             }
-            strncat(result, elem_str, MAX_STRING_LEN - strlen(result) - 1);
+            SBUF_ADD(&out, piece, strlen(piece));
         }
 
-        return make_string(result);
+        return sbuf_finish(&out);
     }
 
     if (strcmp(name, "split") == 0) {
@@ -512,17 +560,13 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
         const char *p;
         while ((p = strstr(start, sep)) != NULL) {
             int len = p - start;
-            char piece[MAX_STRING_LEN];
-            if (len >= MAX_STRING_LEN) len = MAX_STRING_LEN - 1;
-            strncpy(piece, start, len);
-            piece[len] = '\0';
 
             if (result.array_val.size >= result.array_val.capacity) {
                 int new_cap = (result.array_val.capacity == 0) ? 4 : result.array_val.capacity * 2;
                 result.array_val.elements = (Value*)realloc(result.array_val.elements, sizeof(Value) * new_cap);
                 result.array_val.capacity = new_cap;
             }
-            result.array_val.elements[result.array_val.size++] = make_string(piece);
+            result.array_val.elements[result.array_val.size++] = make_string_len(start, (size_t)len);
 
             start = p + sep_len;
         }
@@ -604,9 +648,16 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             report_error("toString() requires 1 argument");
             return make_string("");
         }
-        char buf[MAX_STRING_LEN];
+        if (args[0].type == TYPE_STRING) return make_string(args[0].str_val);
+        char buf[4096];
         value_to_display_string(args[0], buf, sizeof(buf));
-        return make_string(buf);
+        if (strlen(buf) < sizeof(buf) - 1) return make_string(buf);
+        /* Possibly truncated: render again into a large heap buffer. */
+        size_t big_cap = 8 * 1024 * 1024;
+        char *big = (char*)malloc(big_cap);
+        if (!big) return make_string(buf);
+        value_to_display_string(args[0], big, big_cap);
+        return make_string_take(big);
     }
 
     if (strcmp(name, "urlEncode") == 0) {
@@ -615,9 +666,10 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             return make_string("");
         }
         const char *str = args[0].str_val;
-        char result[MAX_STRING_LEN];
+        char *result = (char*)malloc(strlen(str) * 3 + 1);
+        if (!result) return make_string("");
         int out_i = 0;
-        for (int i = 0; str[i] && out_i < MAX_STRING_LEN - 4; i++) {
+        for (int i = 0; str[i]; i++) {
             unsigned char c = (unsigned char)str[i];
             if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
                 result[out_i++] = c;
@@ -629,7 +681,7 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             }
         }
         result[out_i] = '\0';
-        return make_string(result);
+        return make_string_take(result);
     }
 
     if (strcmp(name, "urlDecode") == 0) {
@@ -638,9 +690,10 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             return make_string("");
         }
         const char *str = args[0].str_val;
-        char result[MAX_STRING_LEN];
+        char *result = (char*)malloc(strlen(str) + 1);
+        if (!result) return make_string("");
         int out_i = 0;
-        for (int i = 0; str[i] && out_i < MAX_STRING_LEN - 1; i++) {
+        for (int i = 0; str[i]; i++) {
             if (str[i] == '%' && isxdigit((unsigned char)str[i + 1]) && isxdigit((unsigned char)str[i + 2])) {
                 char hex[3] = { str[i + 1], str[i + 2], '\0' };
                 result[out_i++] = (char)strtol(hex, NULL, 16);
@@ -652,7 +705,7 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
             }
         }
         result[out_i] = '\0';
-        return make_string(result);
+        return make_string_take(result);
     }
 
     if (strcmp(name, "now") == 0) {
@@ -746,16 +799,18 @@ Value call_builtin_function(const char *name, Value *args, int arg_count) {
         long size = ftell(f);
         fseek(f, 0, SEEK_SET);
 
-        if (size > MAX_STRING_LEN - 1) {
-            size = MAX_STRING_LEN - 1;
+        if (size < 0) size = 0;
+        char *buffer = (char*)malloc((size_t)size + 1);
+        if (!buffer) {
+            fclose(f);
+            report_error("Out of memory reading file");
+            return make_string("");
         }
-
-        char buffer[MAX_STRING_LEN];
-        fread(buffer, 1, size, f);
-        buffer[size] = '\0';
+        size_t got = fread(buffer, 1, (size_t)size, f);
+        buffer[got] = '\0';
         fclose(f);
 
-        return make_string(buffer);
+        return make_string_take(buffer);
     }
 
     if (strcmp(name, "write") == 0) {

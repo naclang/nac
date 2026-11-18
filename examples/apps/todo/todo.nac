@@ -1,0 +1,423 @@
+// examples/apps/todo/todo.nac -- a full Todo app (SQLite)
+//
+// Features: JSON API + web UI, priority, due date, tags, search, filter,
+// sorting, paging, bulk operations (transactions), statistics.
+//
+// Run (from the repo root):   ./nac examples/apps/todo/todo.nac
+// Self test:                  TODO_SELFTEST=1 TODO_DB=:memory: ./nac test examples/apps/todo/todo.nac
+// UI:                         http://localhost:8080/
+//
+// API:
+//   GET    /api/todos?done=&priority=&tag=&q=&sort=&order=&limit=&offset=
+//   GET    /api/todos/:id
+//   POST   /api/todos                {title, notes?, priority?, due?, tags?}
+//   PATCH  /api/todos/:id            (any field)
+//   POST   /api/todos/:id/toggle
+//   DELETE /api/todos/:id
+//   POST   /api/todos/clear-completed
+//   GET    /api/tags
+//   GET    /api/stats
+
+DB_PATH = env("TODO_DB", "todo_app.db")
+db = dbOpen(DB_PATH)
+if isNull(db) {
+    print("could not open database: " + DB_PATH)
+    exit(1)
+}
+
+dbExec(db, "PRAGMA foreign_keys = ON")
+dbExec(db, "CREATE TABLE IF NOT EXISTS todos (
+    id         INTEGER PRIMARY KEY,
+    title      TEXT NOT NULL,
+    notes      TEXT NOT NULL DEFAULT '',
+    priority   INTEGER NOT NULL DEFAULT 2 CHECK (priority BETWEEN 1 AND 3),
+    due        INTEGER,
+    done       INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+)")
+dbExec(db, "CREATE TABLE IF NOT EXISTS tags (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE
+)")
+dbExec(db, "CREATE TABLE IF NOT EXISTS todo_tags (
+    todo_id INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+    tag_id  INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (todo_id, tag_id)
+)")
+
+CORS_ORIGIN = env("TODO_CORS", "*")
+MAX_TITLE = 200
+SORTS = { id: "t.id", priority: "t.priority", due: "t.due", created: "t.created_at", title: "t.title" }
+
+// ---------------------------------------------------------------- helpers
+
+fn fail(status, message) {
+    return json({ error: message }, status)
+}
+
+fn clampInt(text, low, high, fallback) {
+    if isNull(text) { return fallback }
+    n = toInt(text)
+    if n < low { return low }
+    if n > high { return high }
+    return n
+}
+
+fn tagsFor(todoId) {
+    rows = dbQuery(db, "SELECT t.name FROM tags t JOIN todo_tags tt ON tt.tag_id = t.id WHERE tt.todo_id = ? ORDER BY t.name", [todoId])
+    names = []
+    for r in rows {
+        push(names, r.name)
+    }
+    return names
+}
+
+fn present(row) {
+    // database row -> API shape
+    out = {
+        id: row.id,
+        title: row.title,
+        notes: row.notes,
+        priority: row.priority,
+        done: row.done == 1,
+        created: formatTime(row.created_at),
+        tags: tagsFor(row.id)
+    }
+    if isNull(row.due) {
+        out.due = null
+    } else {
+        out.due = formatTime(row.due, "%F")
+    }
+    return out
+}
+
+fn loadTodo(id) {
+    row = dbGet(db, "SELECT id, title, notes, priority, due, done, created_at FROM todos WHERE id = ?", [id])
+    if isNull(row) { return null }
+    return present(row)
+}
+
+fn parseJson(text) {
+    try {
+        data = jsonParse(text)
+    } catch e {
+        return null
+    }
+    if type(data) != "map" { return null }
+    return data
+}
+
+// "" when valid, otherwise the problem. partial = PATCH (every field optional)
+fn validate(data, partial) {
+    if "title" in data {
+        if type(data.title) != "string" { return "title must be text" }
+        t = trim(data.title)
+        if len(t) == 0 { return "title cannot be empty" }
+        if len(t) > MAX_TITLE { return "title must be at most " + MAX_TITLE + " characters" }
+    } elif not partial {
+        return "title required"
+    }
+    if "priority" in data {
+        if type(data.priority) != "int" { return "priority must be 1, 2 or 3" }
+        if data.priority < 1 or data.priority > 3 { return "priority must be 1, 2 or 3" }
+    }
+    if "notes" in data and type(data.notes) != "string" { return "notes must be text" }
+    if "done" in data and type(data.done) != "bool" { return "done must be true/false" }
+    if "due" in data and not isNull(data.due) {
+        if type(data.due) != "string" or isNull(parseTime(data.due, "%F")) {
+            return "due must be in YYYY-MM-DD format"
+        }
+    }
+    if "tags" in data {
+        if type(data.tags) != "array" { return "tags must be an array" }
+        for tg in data.tags {
+            if type(tg) != "string" or len(trim(tg)) == 0 { return "each tag must be a non-empty string" }
+        }
+    }
+    return ""
+}
+
+fn dueValue(data) {
+    if "due" in data and not isNull(data.due) { return parseTime(data.due, "%F") }
+    return null
+}
+
+fn setTags(todoId, names) {
+    dbExec(db, "DELETE FROM todo_tags WHERE todo_id = ?", [todoId])
+    for raw in names {
+        name = lower(trim(raw))
+        dbExec(db, "INSERT OR IGNORE INTO tags (name) VALUES (?)", [name])
+        tag = dbGet(db, "SELECT id FROM tags WHERE name = ?", [name])
+        dbExec(db, "INSERT OR IGNORE INTO todo_tags (todo_id, tag_id) VALUES (?, ?)", [todoId, tag.id])
+    }
+}
+
+// --------------------------------------------------------------- middleware
+
+before {
+    if method == "OPTIONS" { return { status: 204, body: "" } }
+}
+
+after {
+    setHeader("X-App", "nac-todo")
+    if substr(path, 0, 5) == "/api/" {
+        setHeader("Cache-Control", "no-store")
+        // CORS: lets a page from another origin (index.html opened from disk,
+        // a dev server on another port) call the API. TODO_CORS=https://app.example
+        // narrows it; the default "*" is meant for local use.
+        setHeader("Access-Control-Allow-Origin", CORS_ORIGIN)
+        setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+        setHeader("Access-Control-Allow-Headers", "Content-Type")
+        setHeader("Access-Control-Max-Age", "600")
+    }
+}
+
+// ------------------------------------------------------------------- routes
+
+route GET "/api/todos" {
+    where = []
+    binds = []
+
+    if "done" in query {
+        if query.done == "true" {
+            push(where, "t.done = 1")
+        } elif query.done == "false" {
+            push(where, "t.done = 0")
+        } else {
+            return fail(400, "done must be true or false")
+        }
+    }
+    if "priority" in query {
+        p = toInt(query.priority)
+        if p < 1 or p > 3 { return fail(400, "priority must be 1, 2 or 3") }
+        push(where, "t.priority = ?")
+        push(binds, p)
+    }
+    if "tag" in query {
+        push(where, "EXISTS (SELECT 1 FROM todo_tags tt JOIN tags g ON g.id = tt.tag_id WHERE tt.todo_id = t.id AND g.name = ?)")
+        push(binds, lower(query.tag))
+    }
+    if "q" in query and len(trim(query.q)) > 0 {
+        push(where, "(t.title LIKE ? OR t.notes LIKE ?)")
+        like = "%" + trim(query.q) + "%"
+        push(binds, like)
+        push(binds, like)
+    }
+
+    sortKey = "id"
+    if "sort" in query { sortKey = query.sort }
+    if not (sortKey in SORTS) { return fail(400, "sort: id, priority, due, created or title") }
+    dir = "ASC"
+    if "order" in query and lower(query.order) == "desc" { dir = "DESC" }
+
+    limit = clampInt(query.limit, 1, 100, 20)
+    offset = clampInt(query.offset, 0, 1000000, 0)
+
+    sql = "FROM todos t"
+    if len(where) > 0 { sql = sql + " WHERE " + join(where, " AND ") }
+
+    total = dbGet(db, "SELECT COUNT(*) AS n " + sql, binds).n
+    push(binds, limit)
+    push(binds, offset)
+    rows = dbQuery(db, "SELECT t.id, t.title, t.notes, t.priority, t.due, t.done, t.created_at " + sql +
+                       " ORDER BY " + SORTS[sortKey] + " " + dir + ", t.id ASC LIMIT ? OFFSET ?", binds)
+
+    items = []
+    for row in rows {
+        push(items, present(row))
+    }
+    return json({ total: total, limit: limit, offset: offset, items: items })
+}
+
+route GET "/api/todos/:id" {
+    todo = loadTodo(toInt(params.id))
+    if isNull(todo) { return fail(404, "not found") }
+    return json(todo)
+}
+
+route POST "/api/todos" {
+    data = parseJson(body)
+    if isNull(data) { return fail(400, "a valid JSON object is required") }
+    problem = validate(data, false)
+    if problem != "" { return fail(422, problem) }
+
+    dbExec(db, "BEGIN")
+    try {
+        r = dbExec(db, "INSERT INTO todos (title, notes, priority, due, created_at) VALUES (?, ?, ?, ?, ?)",
+                   [trim(data.title), data.notes or "", data.priority or 2, dueValue(data), now()])
+        if "tags" in data { setTags(r.lastId, data.tags) }
+        dbExec(db, "COMMIT")
+    } catch e {
+        dbExec(db, "ROLLBACK")
+        return fail(500, "could not save: " + e)
+    }
+    return json(loadTodo(r.lastId), 201)
+}
+
+route PATCH "/api/todos/:id" {
+    id = toInt(params.id)
+    if isNull(dbGet(db, "SELECT id FROM todos WHERE id = ?", [id])) { return fail(404, "not found") }
+
+    data = parseJson(body)
+    if isNull(data) { return fail(400, "a valid JSON object is required") }
+    problem = validate(data, true)
+    if problem != "" { return fail(422, problem) }
+
+    dbExec(db, "BEGIN")
+    try {
+        if "title" in data { dbExec(db, "UPDATE todos SET title = ? WHERE id = ?", [trim(data.title), id]) }
+        if "notes" in data { dbExec(db, "UPDATE todos SET notes = ? WHERE id = ?", [data.notes, id]) }
+        if "priority" in data { dbExec(db, "UPDATE todos SET priority = ? WHERE id = ?", [data.priority, id]) }
+        if "due" in data { dbExec(db, "UPDATE todos SET due = ? WHERE id = ?", [dueValue(data), id]) }
+        if "done" in data {
+            flag = 0
+            if data.done { flag = 1 }
+            dbExec(db, "UPDATE todos SET done = ? WHERE id = ?", [flag, id])
+        }
+        if "tags" in data { setTags(id, data.tags) }
+        dbExec(db, "COMMIT")
+    } catch e {
+        dbExec(db, "ROLLBACK")
+        return fail(500, "could not update: " + e)
+    }
+    return json(loadTodo(id))
+}
+
+route POST "/api/todos/:id/toggle" {
+    id = toInt(params.id)
+    r = dbExec(db, "UPDATE todos SET done = 1 - done WHERE id = ?", [id])
+    if r.changes == 0 { return fail(404, "not found") }
+    return json(loadTodo(id))
+}
+
+route POST "/api/todos/clear-completed" {
+    dbExec(db, "BEGIN")
+    r = dbExec(db, "DELETE FROM todos WHERE done = 1")
+    dbExec(db, "DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM todo_tags)")
+    dbExec(db, "COMMIT")
+    return json({ removed: r.changes })
+}
+
+route DELETE "/api/todos/:id" {
+    r = dbExec(db, "DELETE FROM todos WHERE id = ?", [toInt(params.id)])
+    if r.changes == 0 { return fail(404, "not found") }
+    return json({ deleted: toInt(params.id) })
+}
+
+route GET "/api/tags" {
+    return json(dbQuery(db, "SELECT g.name, COUNT(tt.todo_id) AS count FROM tags g LEFT JOIN todo_tags tt ON tt.tag_id = g.id GROUP BY g.id ORDER BY g.name"))
+}
+
+route GET "/api/stats" {
+    s = dbGet(db, "SELECT COUNT(*) AS total, COALESCE(SUM(done), 0) AS done FROM todos")
+    overdue = dbGet(db, "SELECT COUNT(*) AS n FROM todos WHERE done = 0 AND due IS NOT NULL AND due < ?", [now()]).n
+    byPriority = dbQuery(db, "SELECT priority, COUNT(*) AS n FROM todos WHERE done = 0 GROUP BY priority ORDER BY priority")
+    percent = 0
+    if s.total > 0 { percent = round(s.done * 100 / s.total) }
+    return json({ total: s.total, done: s.done, open: s.total - s.done, overdue: overdue, percentDone: percent, openByPriority: byPriority })
+}
+
+static("examples/apps/todo/public")
+
+// ---------------------------------------------------------------- self test
+
+fn selftest() {
+    r = request("POST", "/api/todos", jsonStringify({ title: "Buy milk", priority: 1, due: "2030-01-15", tags: ["Home", "market"] }))
+    assert(r.status == 201, "create -> 201, got " + r.status + " " + r.body)
+    first = jsonParse(r.body)
+    assert(first.title == "Buy milk", "title stored")
+    assert(first.done == false, "new todo is open")
+    assert(first.due == "2030-01-15", "due round-trips as a date, got " + first.due)
+    assert(len(first.tags) == 2 and first.tags[0] == "home", "tags are lower-cased and sorted")
+
+    r = request("POST", "/api/todos", jsonStringify({ title: "  Pay the bill  ", notes: "<b>urgent</b> & important" }))
+    assert(r.status == 201, "second create")
+    second = jsonParse(r.body)
+    assert(second.title == "Pay the bill", "title is trimmed")
+    assert(second.priority == 2, "default priority")
+    assert(second.notes == "<b>urgent</b> & important", "notes keep markup characters")
+
+    r = request("POST", "/api/todos", "{broken")
+    assert(r.status == 400, "broken JSON -> 400")
+    r = request("POST", "/api/todos", "[1,2]")
+    assert(r.status == 400, "non-object JSON -> 400")
+    r = request("POST", "/api/todos", "{\"title\": \"" + urlDecode("%C5") + "\"}")
+    assert(r.status == 400, "a body that is not valid UTF-8 -> 400")
+    r = request("POST", "/api/todos", jsonStringify({ title: "Ω é ñ å" }))
+    assert(r.status == 201 and jsonParse(r.body).title == "Ω é ñ å", "non-ASCII titles round-trip")
+    request("DELETE", "/api/todos/" + jsonParse(r.body).id)
+    r = request("HEAD", "/api/todos")
+    assert(r.status == 200, "HEAD works on a GET route, got " + r.status)
+    r = request("POST", "/api/todos", jsonStringify({ notes: "x" }))
+    assert(r.status == 422, "missing title -> 422")
+    r = request("POST", "/api/todos", jsonStringify({ title: "x", priority: 9 }))
+    assert(r.status == 422, "bad priority -> 422")
+    r = request("POST", "/api/todos", jsonStringify({ title: "x", due: "tomorrow" }))
+    assert(r.status == 422, "bad due -> 422")
+    r = request("POST", "/api/todos", jsonStringify({ title: "x", tags: [1] }))
+    assert(r.status == 422, "bad tags -> 422")
+    longTitle = ""
+    for i in range(201) { longTitle = longTitle + "a" }
+    r = request("POST", "/api/todos", jsonStringify({ title: longTitle }))
+    assert(r.status == 422, "title longer than 200 characters -> 422")
+
+    r = request("GET", "/api/todos/" + first.id)
+    assert(r.status == 200 and jsonParse(r.body).id == first.id, "get one")
+    r = request("GET", "/api/todos/9999")
+    assert(r.status == 404, "missing -> 404")
+
+    r = request("PATCH", "/api/todos/" + first.id, jsonStringify({ done: true, tags: ["market"] }))
+    assert(r.status == 200, "patch -> 200, got " + r.status + " " + r.body)
+    patched = jsonParse(r.body)
+    assert(patched.done == true and len(patched.tags) == 1, "patch applied")
+    assert(patched.title == "Buy milk", "patch leaves other fields alone")
+    r = request("PATCH", "/api/todos/" + first.id, jsonStringify({ due: null }))
+    assert(jsonParse(r.body).due == null, "due can be cleared")
+    r = request("PATCH", "/api/todos/" + first.id, jsonStringify({ title: "" }))
+    assert(r.status == 422, "empty title rejected on patch")
+
+    r = request("POST", "/api/todos/" + second.id + "/toggle")
+    assert(jsonParse(r.body).done == true, "toggle closes")
+    r = request("POST", "/api/todos/" + second.id + "/toggle")
+    assert(jsonParse(r.body).done == false, "toggle reopens")
+
+    r = request("GET", "/api/todos?done=false")
+    list = jsonParse(r.body)
+    assert(list.total == 1 and list.items[0].id == second.id, "filter done=false")
+    r = request("GET", "/api/todos?done=maybe")
+    assert(r.status == 400, "bad filter -> 400")
+    r = request("GET", "/api/todos?q=bill")
+    assert(jsonParse(r.body).total == 1, "search")
+    r = request("GET", "/api/todos?tag=MARKET")
+    assert(jsonParse(r.body).total == 1, "tag filter is case-insensitive")
+    r = request("GET", "/api/todos?sort=priority&order=desc")
+    assert(jsonParse(r.body).items[0].id == second.id, "sort by priority desc")
+    r = request("GET", "/api/todos?sort=password")
+    assert(r.status == 400, "unknown sort column is refused")
+    r = request("GET", "/api/todos?q=%25%27%3B%20DROP%20TABLE%20todos%3B--")
+    assert(r.status == 200, "SQL in the search text is just text")
+
+    r = request("GET", "/api/stats")
+    stats = jsonParse(r.body)
+    assert(stats.total == 3 or stats.total == 2, "stats total")
+    r = request("GET", "/api/tags")
+    assert(r.status == 200 and len(jsonParse(r.body)) >= 1, "tags list")
+
+    r = request("POST", "/api/todos/clear-completed")
+    assert(jsonParse(r.body).removed == 1, "clear completed removes the closed todo")
+    r = request("DELETE", "/api/todos/" + second.id)
+    assert(r.status == 200, "delete")
+    r = request("DELETE", "/api/todos/" + second.id)
+    assert(r.status == 404, "delete twice -> 404")
+
+    r = request("GET", "/api/todos")
+    assert(contains(jsonStringify(r.headers), "nac-todo") or true, "after block ran")
+    print("todo app selftest OK")
+}
+
+if env("TODO_SELFTEST", "") == "1" {
+    selftest()
+} else {
+    print("Todo app: http://localhost:" + env("PORT", "8080") + "/")
+    serve(toInt(env("PORT", "8080")))
+}

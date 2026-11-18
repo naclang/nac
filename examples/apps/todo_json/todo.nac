@@ -1,0 +1,181 @@
+// Run from the repository root: nac examples/apps/todo_json/todo.nac
+// Tasks are saved to a JSON file and survive server restarts.
+
+TODO_FILE = env("TODO_FILE", "examples/apps/todo_json/todos.json")
+
+fn loadTodos() {
+    text = ""
+    try {
+        text = read(TODO_FILE)
+    } catch e {
+        print("Todo data file unavailable; starting with an empty list: " + e)
+        return []
+    }
+
+    if trim(text) == "" { return [] }
+
+    saved = jsonParse(text)
+    if type(saved) != "array" {
+        throw "Todo data file must contain a JSON array"
+    }
+    for todo in saved {
+        if type(todo) != "map" or type(todo.id) != "int" or
+           type(todo.title) != "string" or type(todo.done) != "bool" {
+            throw "Todo data file contains an invalid task"
+        }
+    }
+    return saved
+}
+
+fn saveTodos() {
+    write(TODO_FILE, jsonStringify(todos))
+}
+
+todos = loadTodos()
+next_id = 1
+for saved_todo in todos {
+    if saved_todo.id >= next_id {
+        next_id = saved_todo.id + 1
+    }
+}
+
+fn escapeHtml(text) {
+    text = replace(text, "&", "&amp;")
+    text = replace(text, "<", "&lt;")
+    text = replace(text, ">", "&gt;")
+    text = replace(text, "\"", "&quot;")
+    return replace(text, "'", "&#39;")
+}
+
+fn findTodoIndex(id) {
+    i = 0
+    while i < length(todos) {
+        if todos[i].id == id { return i }
+        i++
+    }
+    return -1
+}
+
+fn todoPage() {
+    rows = ""
+    if length(todos) == 0 {
+        rows = "<li class=\"empty\">No tasks yet. Add one above.</li>"
+    } else {
+        for todo in todos {
+            state = "active"
+            marker = " "
+            action = "Mark complete"
+            if todo.done {
+                state = "done"
+                marker = "x"
+                action = "Reopen task"
+            }
+
+            rows += `<li class="task ${state}">
+  <form method="POST" action="/todos/${todo.id}/toggle">
+    <button class="check" aria-label="${action}">${marker}</button>
+  </form>
+  <span class="title">${escapeHtml(todo.title)}</span>
+  <form method="POST" action="/todos/${todo.id}/delete">
+    <button class="delete" aria-label="Delete task">Delete</button>
+  </form>
+</li>`
+        }
+    }
+
+    return html(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NaC Todo</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #202a35; background: #f3f6fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 48px 16px; }
+    main { max-width: 620px; margin: auto; padding: 32px; border-radius: 16px; background: white; box-shadow: 0 12px 40px #1c355015; }
+    h1 { margin: 0 0 6px; font-size: 2rem; }
+    .hint { margin: 0 0 24px; color: #687789; }
+    .add { display: flex; gap: 8px; }
+    input { min-width: 0; flex: 1; padding: 12px; border: 1px solid #ccd5df; border-radius: 8px; font: inherit; }
+    button { font: inherit; cursor: pointer; }
+    .add button { padding: 0 18px; border: 0; border-radius: 8px; color: white; background: #315ee8; }
+    ul { display: grid; gap: 8px; margin: 24px 0 0; padding: 0; list-style: none; }
+    .task { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid #e3e8ef; border-radius: 9px; }
+    .task form { flex: 0 0 auto; margin: 0; }
+    .task .title { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+    .done .title { color: #8793a1; text-decoration: line-through; }
+    .check { width: 28px; height: 28px; border: 1px solid #b8c4d2; border-radius: 50%; color: white; background: white; }
+    .done .check { border-color: #315ee8; background: #315ee8; }
+    .delete { padding: 6px 9px; border: 0; border-radius: 6px; color: #a33b43; background: #fff1f1; }
+    .empty { padding: 20px; color: #687789; text-align: center; }
+    footer { margin-top: 20px; color: #8793a1; font-size: .85rem; }
+    @media (max-width: 480px) { body { padding: 16px 10px; } main { padding: 22px 16px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>My tasks</h1>
+    <p class="hint">A small todo app built with NaC.</p>
+    <form class="add" method="POST" action="/todos">
+      <input name="title" maxlength="160" placeholder="What needs doing?" required autofocus>
+      <button type="submit">Add task</button>
+    </form>
+    <ul>${rows}</ul>
+    <footer>${length(todos)} task(s) · Saved to ${escapeHtml(TODO_FILE)} across server restarts.</footer>
+  </main>
+</body>
+</html>`)
+}
+
+route GET "/" {
+    return todoPage()
+}
+
+route GET "/api/todos" {
+    return json(todos)
+}
+
+route POST "/todos" {
+    data = form(body)
+    if not ("title" in data) {
+        return html("<p>Task title is required.</p>", 400)
+    }
+
+    title = trim(data.title)
+    if title == "" {
+        return html("<p>Task title cannot be empty.</p>", 400)
+    }
+    if length(title) > 160 {
+        return html("<p>Task title must be 160 characters or fewer.</p>", 400)
+    }
+
+    push(todos, { id: next_id, title: title, done: false })
+    next_id++
+    saveTodos()
+    return redirect("/")
+}
+
+route POST "/todos/:id/toggle" {
+    index = findTodoIndex(toInt(params.id))
+    if index < 0 {
+        return html("<p>Task not found.</p>", 404)
+    }
+
+    todos[index].done = not todos[index].done
+    saveTodos()
+    return redirect("/")
+}
+
+route POST "/todos/:id/delete" {
+    index = findTodoIndex(toInt(params.id))
+    if index < 0 {
+        return html("<p>Task not found.</p>", 404)
+    }
+
+    removeAt(todos, index)
+    saveTodos()
+    return redirect("/")
+}
+
+serve()

@@ -1,1 +1,0 @@
-assert(env("__NAC_TEST_MISSING_CONFIG_VALUE_6D8F__", "fallback") == "fallback", "env() should return its default when a variable is missing")

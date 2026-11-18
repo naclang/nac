@@ -159,17 +159,8 @@ static int column_value(const char *fn, sqlite3_stmt *stmt, int col, Value *out)
             return 1;
         case SQLITE_TEXT: {
             int bytes = sqlite3_column_bytes(stmt, col);
-            if (bytes >= MAX_STRING_LEN) {
-                snprintf(msg, sizeof(msg),
-                         "column '%s' holds %d bytes; NaC strings are limited to %d "
-                         "(select substr(%s, 1, 8000) instead)",
-                         sqlite3_column_name(stmt, col), bytes, MAX_STRING_LEN - 1,
-                         sqlite3_column_name(stmt, col));
-                fail(fn, msg);
-                return 0;
-            }
             const unsigned char *text = sqlite3_column_text(stmt, col);
-            *out = make_string(text ? (const char*)text : "");
+            *out = text ? make_string_len((const char*)text, (size_t)bytes) : make_string("");
             return 1;
         }
         case SQLITE_BLOB:
@@ -224,7 +215,10 @@ static Value run_sql(const char *fn, Value *args, int arg_count, DbMode mode) {
 
     const Value *params = (arg_count == 3 && args[2].type != TYPE_NULL) ? &args[2] : NULL;
     const char *tail = args[1].str_val;
-    int total_before = sqlite3_total_changes(db);
+    /* Rows changed by the statements themselves. sqlite3_total_changes() would
+     * also count rows removed by ON DELETE CASCADE and trigger bodies, so a
+     * DELETE of one row could report 2. */
+    int direct_changes = 0;
 
     Value rows = make_array(0);
     Value first_row = make_null();
@@ -266,6 +260,7 @@ static Value run_sql(const char *fn, Value *args, int arg_count, DbMode mode) {
             break;
         }
 
+        int changes_before = sqlite3_total_changes(db);
         for (;;) {
             int rc = sqlite3_step(stmt);
             if (rc == SQLITE_ROW) {
@@ -296,6 +291,11 @@ static Value run_sql(const char *fn, Value *args, int arg_count, DbMode mode) {
                 break;
             }
         }
+        /* sqlite3_changes() is the count of the last INSERT/UPDATE/DELETE, so
+         * it is only this statement's when something actually changed. */
+        if (!failed && sqlite3_total_changes(db) != changes_before) {
+            direct_changes += sqlite3_changes(db);
+        }
         sqlite3_finalize(stmt);
         if (failed || mode == DB_GET) break;
         tail = next;
@@ -315,7 +315,7 @@ static Value run_sql(const char *fn, Value *args, int arg_count, DbMode mode) {
     if (mode == DB_GET) return first_row;
 
     Value result = make_map();
-    Value changes = make_int(sqlite3_total_changes(db) - total_before);
+    Value changes = make_int(direct_changes);
     Value last_id = make_int((int)sqlite3_last_insert_rowid(db));
     map_set(&result, "changes", changes);
     map_set(&result, "lastId", last_id);

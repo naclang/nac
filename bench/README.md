@@ -13,6 +13,17 @@ environment syntax (`PORT=8080 nac ...`); in PowerShell use
 `$env:PORT=8080; nac ...` and clear the variables afterwards
 (`Remove-Item Env:PORT`).
 
+## Disable the rate limiter
+
+NaC rate-limits each client IP by default (120 requests per window), so a
+single-machine benchmark would mostly measure `429 Too Many Requests`
+responses. Start every NaC server under test with the limiter off, and note
+that `run.js` counts any status >= 400 as an error:
+
+```text
+NAC_RATE_LIMIT_MAX=0 PORT=8080 nac bench/nac/hello.nac
+```
+
 ## Scenarios
 
 | Scenario | NaC app | URL | Reference server |

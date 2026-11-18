@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NaC Todo</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <h1>NaC Todo</h1>
+  <div class="stats" id="stats">Loading...</div>
+
+  <form id="new">
+    <input name="title" placeholder="New task" maxlength="200" required>
+    <select name="priority"><option value="1">High</option><option value="2" selected>Medium</option><option value="3">Low</option></select>
+    <input name="due" type="date">
+    <button>Add</button>
+    <input name="tags" placeholder="tags (comma-separated)" style="grid-column:1 / -1">
+  </form>
+
+  <div class="filters">
+    <input id="q" placeholder="Search...">
+    <select id="done"><option value="">All</option><option value="false">Open</option><option value="true">Done</option></select>
+    <select id="sort"><option value="id">Added</option><option value="priority">Priority</option><option value="due">Due date</option><option value="title">Title</option></select>
+    <button class="ghost" id="clear">Clear completed</button>
+  </div>
+
+  <ul id="list"></ul>
+  <div class="err" id="err" hidden></div>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const PRI = { 1: "High", 2: "Medium", 3: "Low" };
+
+// Served by NaC the API is on the same origin. Opened straight from disk
+// (file://) there is no origin, so talk to the local server instead; pass
+// ?api=http://host:port to point it somewhere else.
+const API = new URLSearchParams(location.search).get("api") ||
+            (location.protocol === "file:" ? "http://localhost:8080" : "");
+
+async function api(path, opts) {
+  const res = await fetch(API + path, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.status);
+  return data;
+}
+function showError(e) { const el = $("#err"); el.hidden = !e; el.textContent = e ? e.message : ""; }
+
+function row(t) {
+  const li = document.createElement("li");
+  if (t.done) li.className = "done";
+  const box = document.createElement("input");
+  box.type = "checkbox"; box.checked = t.done;
+  box.onchange = () => act(() => api(`/api/todos/${t.id}/toggle`, { method: "POST" }));
+  const body = document.createElement("div");
+  body.className = "grow";
+  const title = document.createElement("div");
+  title.className = "title"; title.textContent = t.title;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const pr = document.createElement("span");
+  pr.className = "p" + t.priority; pr.textContent = PRI[t.priority];
+  meta.append(pr);
+  if (t.due) { const d = document.createElement("span"); d.textContent = t.due; meta.append(d); }
+  for (const tag of t.tags) { const s = document.createElement("span"); s.className = "pill"; s.textContent = "#" + tag; meta.append(s); }
+  body.append(title, meta);
+  if (t.notes) { const n = document.createElement("div"); n.className = "meta"; n.textContent = t.notes; body.append(n); }
+  const del = document.createElement("button");
+  del.className = "ghost"; del.textContent = "Delete";
+  del.onclick = () => act(() => api(`/api/todos/${t.id}`, { method: "DELETE" }));
+  li.append(box, body, del);
+  return li;
+}
+
+async function load() {
+  const p = new URLSearchParams({ limit: "100", sort: $("#sort").value });
+  if ($("#done").value) p.set("done", $("#done").value);
+  if ($("#q").value.trim()) p.set("q", $("#q").value.trim());
+  const [list, s] = await Promise.all([api("/api/todos?" + p), api("/api/stats")]);
+  const ul = $("#list"); ul.replaceChildren();
+  if (!list.items.length) { const e = document.createElement("li"); e.className = "empty"; e.textContent = "No tasks."; ul.append(e); }
+  for (const t of list.items) ul.append(row(t));
+  $("#stats").textContent = `${s.open} open, ${s.done} done, ${s.overdue} overdue (${s.percentDone}% complete)`;
+}
+async function act(fn) { try { showError(null); await fn(); await load(); } catch (e) { showError(e); } }
+
+$("#new").onsubmit = (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const body = { title: f.get("title"), priority: Number(f.get("priority")) };
+  if (f.get("due")) body.due = f.get("due");
+  const tags = String(f.get("tags") || "").split(",").map((x) => x.trim()).filter(Boolean);
+  if (tags.length) body.tags = tags;
+  act(async () => { await api("/api/todos", { method: "POST", body: JSON.stringify(body) }); ev.target.reset(); });
+};
+$("#clear").onclick = () => act(() => api("/api/todos/clear-completed", { method: "POST" }));
+for (const id of ["#q", "#done", "#sort"]) $(id).oninput = () => act(async () => {});
+act(async () => {});
+</script>
+</body>
+</html>

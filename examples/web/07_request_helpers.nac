@@ -1,9 +1,9 @@
-// examples/web/07_request_helpers.nac -- form(), header() ve cors()
+// examples/web/07_request_helpers.nac -- form(), header() and cors()
 //
-// Calistir:  ./nac examples/web/07_request_helpers.nac
-// Deneme:    curl -i -X POST -d "name=Ada" http://localhost:8080/api/greet
+// Run:  ./nac examples/web/07_request_helpers.nac
+// Try:       curl -i -X POST -d "name=Ada" http://localhost:8080/api/greet
 //
-// Tarayicidan localhost:3000 origin'inden erisime izin veren bir ornek.
+// Allows browser access from the http://localhost:3000 origin.
 ORIGIN = "http://localhost:3000"
 
 route OPTIONS "/api/greet" {

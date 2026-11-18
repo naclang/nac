@@ -5,7 +5,10 @@
 
 #include "../lexer/token.h"
 
-#define MAX_ARRAY_SIZE 10000
+/* Arrays grow on demand; this is only a sanity ceiling for range(), array()
+ * and query results so a typo (range(1000000000)) fails with an error
+ * instead of exhausting memory. */
+#define MAX_ARRAY_SIZE 50000000
 
 typedef enum {
     TYPE_INT,

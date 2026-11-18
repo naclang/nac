@@ -116,7 +116,7 @@ async function runPhase(target, opts, headers, seconds) {
       res.resume();
       res.on('end', () => {
         const elapsed = Number(process.hrtime.bigint() - started) / 1e6;
-        if (res.statusCode >= 500) {
+        if (res.statusCode >= 400) {
           errors++;
           if (!firstError) firstError = `HTTP ${res.statusCode}`;
         } else {

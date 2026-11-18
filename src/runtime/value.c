@@ -96,6 +96,11 @@ Value make_array(int size) {
     val.array_val.size = size;
     val.array_val.capacity = size;
     val.array_val.elements = (Value*)calloc((size_t)size, sizeof(Value));
+    if (!val.array_val.elements && size > 0) {
+        val.array_val.size = 0;
+        val.array_val.capacity = 0;
+        size = 0;
+    }
     for (int i = 0; i < size; i++) {
         val.array_val.elements[i] = make_int(0);
     }
@@ -233,7 +238,17 @@ void print_value(Value v) {
 }
 
 Value copy_value(Value v) {
-    if (v.type == TYPE_STRING || v.type == TYPE_FUNC) {
+    if (v.type == TYPE_STRING) {
+        /* Always a real copy, even of a borrowed view: a view points into a
+         * variable or container that may be changed or freed later (for
+         * example `n = m.name; m.name = "x"`), which would leave the stored
+         * value dangling. */
+        if (v.str_val) return make_string(v.str_val);
+        v.owned = 0;
+        return v;
+    }
+
+    if (v.type == TYPE_FUNC) {
         if (v.owned && v.str_val) {
             Value copy = make_string(v.str_val);
             copy.type = v.type;

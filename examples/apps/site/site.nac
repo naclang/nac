@@ -1,0 +1,36 @@
+// examples/apps/site/site.nac -- a complete site: static files + routes
+//
+// Run:  nac examples/apps/site/site.nac   (from the repo root)
+// Try:  http://localhost:8080/
+
+users = ["Ada", "Turing", "Grace"]
+
+static("examples/apps/site/public")            // "/" -> public/index.html
+
+route GET "/hello/:name" {
+    return html(`<h1>Hello, ${params.name}!</h1>`)
+}
+
+route GET "/api/users" {
+    return json(users)
+}
+
+route GET "/api/users/:id" {
+    id = toInt(params.id)
+    if id < 0 or id >= length(users) {
+        return json({ error: "user not found" }, 404)
+    }
+    return json({ id: id, name: users[id] })
+}
+
+route POST "/api/users" {
+    data = jsonParse(body)
+    push(users, data.name)
+    return json(users, 201)
+}
+
+route GET "/old" {
+    return redirect("/")
+}
+
+serve(8080)

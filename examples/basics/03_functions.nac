@@ -1,0 +1,55 @@
+// 03 - Functions and recursion
+//
+// Run:  nac examples/basics/03_functions.nac
+//
+// Tip: assigning to a name that already exists globally changes the global,
+// so give helper variables specific names.
+
+fn add(a, b) {
+    return a + b
+}
+
+fn factorial(num) {
+    if num <= 1 {
+        return 1
+    }
+    return num * factorial(num - 1)
+}
+
+fn fib(num) {
+    if num <= 1 {
+        return num
+    }
+    return fib(num - 1) + fib(num - 2)
+}
+
+fn is_prime(num) {
+    if num < 2 {
+        return false
+    }
+    divisor = 2
+    while divisor * divisor <= num {
+        if num % divisor == 0 {
+            return false
+        }
+        divisor++
+    }
+    return true
+}
+
+fn nothing() {
+    return
+}
+
+print("add(2, 3) =", add(2, 3))
+print("factorial(5) =", factorial(5))
+print("fib(10) =", fib(10))
+
+print("primes up to 30:")
+for candidate in range(2, 31) {
+    if is_prime(candidate) {
+        print(candidate)
+    }
+}
+
+print("a bare return gives null:", nothing() == null)

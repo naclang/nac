@@ -12,6 +12,7 @@
 #include "../runtime/eval.h"
 #include "../runtime/json.h"
 #include "router.h"
+#include "../util/strutil.h"
 
 #if defined(_MSC_VER)
 #define NAC_THREADLOCAL __declspec(thread)
@@ -208,7 +209,7 @@ void nac_http_parse_request(const char *raw, int header_end, NacHttpRequest *req
     req->query = make_map();
     req->headers = make_map();
     req->cookie = make_map();
-    req->body[0] = '\0';
+    req->body = (char*)calloc(1, 1);
     req->content_length = 0;
     req->http_minor = 0;
     req->client_ip[0] = '\0';
@@ -250,13 +251,19 @@ void nac_http_free_request(NacHttpRequest *req) {
     free_value(&req->query);
     free_value(&req->headers);
     free_value(&req->cookie);
+    free(req->body);
+    req->body = NULL;
 }
 
-static int ci_equal_n(const char *a, const char *b, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) return 0;
-    }
-    return 1;
+int nac_http_set_body(NacHttpRequest *req, const char *data, int len) {
+    if (len < 0) len = 0;
+    char *copy = (char*)malloc((size_t)len + 1);
+    if (!copy) return -1;
+    if (len > 0) memcpy(copy, data, (size_t)len);
+    copy[len] = '\0';
+    free(req->body);
+    req->body = copy;
+    return 0;
 }
 
 /* True when a comma-separated header value contains `token` (case-insensitive). */
@@ -270,7 +277,7 @@ static int header_list_has_token(const char *list, const char *token) {
         const char *end = p;
         while (end > start && isspace((unsigned char)end[-1])) end--;
 
-        if ((size_t)(end - start) == token_len && ci_equal_n(start, token, token_len)) {
+        if ((size_t)(end - start) == token_len && nac_ci_equal_n(start, token, token_len)) {
             return 1;
         }
     }
@@ -320,18 +327,41 @@ static const char *status_text(int status) {
     }
 }
 
-int nac_http_build_response(int found_handler, const char *handler_name, Value result,
-                             int keep_alive, int is_head, char *out, int out_cap,
-                             int *out_status) {
+static char *dup_str(const char *s) {
+    size_t n = strlen(s);
+    char *copy = (char*)malloc(n + 1);
+    if (copy) memcpy(copy, s, n + 1);
+    return copy;
+}
+
+/* Renders a value the way print() shows it, into a heap string. Small values
+ * use a 4 KiB scratch buffer; if that may have truncated, retry at 1 MiB. */
+static char *display_to_heap(Value v) {
+    char small[4096];
+    value_to_display_string(v, small, sizeof(small));
+    if (strlen(small) < sizeof(small) - 1) return dup_str(small);
+
+    size_t cap = 1024 * 1024;
+    char *big = (char*)malloc(cap);
+    if (!big) return dup_str(small);
+    value_to_display_string(v, big, cap);
+    return big;
+}
+
+char *nac_http_build_response_alloc(int found_handler, const char *handler_name, Value result,
+                                    int keep_alive, int is_head, int *out_len,
+                                    int *out_status) {
     int status = 200;
     char content_type[128] = "text/plain; charset=utf-8";
-    char body[MAX_STRING_LEN] = "";
+    char *body = NULL;
     char extra_header_lines[4096] = "";
     char set_cookie_lines[4096] = "";
 
     if (!found_handler) {
         status = 500;
-        snprintf(body, sizeof(body), "NaC HTTP server: handler function '%s' not found", handler_name);
+        char msg[512];
+        snprintf(msg, sizeof(msg), "NaC HTTP server: handler function '%s' not found", handler_name);
+        body = dup_str(msg);
     } else if (result.type == TYPE_MAP) {
         Value *status_v = map_get(&result, "status");
         if (status_v) status = to_int(*status_v);
@@ -339,16 +369,14 @@ int nac_http_build_response(int found_handler, const char *handler_name, Value r
         Value *body_v = map_get(&result, "body");
         if (body_v) {
             if (body_v->type == TYPE_STRING) {
-                strncpy(body, body_v->str_val, sizeof(body) - 1);
+                body = dup_str(body_v->str_val);
             } else if (body_v->type == TYPE_MAP || body_v->type == TYPE_ARRAY) {
-                char *json = json_stringify_value(*body_v);
-                if (json) {
-                    strncpy(body, json, sizeof(body) - 1);
-                    free(json);
+                body = json_stringify_value(*body_v);
+                if (body) {
                     strncpy(content_type, "application/json", sizeof(content_type) - 1);
                 }
             } else {
-                value_to_display_string(*body_v, body, sizeof(body));
+                body = display_to_heap(*body_v);
             }
         }
 
@@ -379,10 +407,13 @@ int nac_http_build_response(int found_handler, const char *handler_name, Value r
             }
         }
     } else if (result.type == TYPE_STRING) {
-        strncpy(body, result.str_val, sizeof(body) - 1);
+        body = dup_str(result.str_val);
     } else {
-        value_to_display_string(result, body, sizeof(body));
+        body = display_to_heap(result);
     }
+
+    if (!body) body = dup_str("");
+    if (!body) return NULL;
 
     /* Web-first default: a plain string that looks like markup is HTML. */
     if (strcmp(content_type, "text/plain; charset=utf-8") == 0) {
@@ -404,14 +435,16 @@ int nac_http_build_response(int found_handler, const char *handler_name, Value r
      * (including Content-Length) of the equivalent GET, but no body. */
     int status_allows_body = !(status == 204 || status == 205 || status == 304 ||
                                (status >= 100 && status < 200));
+    size_t body_len = strlen(body);
     char content_length_line[64] = "";
     if (status_allows_body) {
         snprintf(content_length_line, sizeof(content_length_line),
-                 "Content-Length: %d\r\n", (int)strlen(body));
+                 "Content-Length: %lu\r\n", (unsigned long)body_len);
     }
-    const char *body_out = (status_allows_body && !is_head) ? body : "";
+    size_t send_len = (status_allows_body && !is_head) ? body_len : 0;
 
-    int written = snprintf(out, out_cap,
+    char head[16384];
+    int head_len = snprintf(head, sizeof(head),
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
         "%s"
@@ -419,14 +452,43 @@ int nac_http_build_response(int found_handler, const char *handler_name, Value r
         NAC_SECURITY_HEADERS
         "%s"
         "%s"
-        "\r\n"
-        "%s",
+        "\r\n",
         status, status_text(status), content_type, content_length_line,
         keep_alive ? "keep-alive" : "close",
-        extra_header_lines, set_cookie_lines, body_out);
+        extra_header_lines, set_cookie_lines);
+    if (head_len < 0 || head_len >= (int)sizeof(head)) {
+        free(body);
+        return NULL;
+    }
 
-    if (written < 0 || written >= out_cap) return -1;
-    return written;
+    char *out = (char*)malloc((size_t)head_len + send_len + 1);
+    if (!out) {
+        free(body);
+        return NULL;
+    }
+    memcpy(out, head, (size_t)head_len);
+    if (send_len) memcpy(out + head_len, body, send_len);
+    out[(size_t)head_len + send_len] = '\0';
+    free(body);
+
+    if (out_len) *out_len = (int)((size_t)head_len + send_len);
+    return out;
+}
+
+int nac_http_build_response(int found_handler, const char *handler_name, Value result,
+                             int keep_alive, int is_head, char *out, int out_cap,
+                             int *out_status) {
+    int len = 0;
+    char *resp = nac_http_build_response_alloc(found_handler, handler_name, result,
+                                               keep_alive, is_head, &len, out_status);
+    if (!resp) return -1;
+    if (len >= out_cap) {
+        free(resp);
+        return -1;
+    }
+    memcpy(out, resp, (size_t)len + 1);
+    free(resp);
+    return len;
 }
 
 int nac_http_build_error_response(int status, const char *message,
@@ -539,15 +601,6 @@ static NAC_THREADLOCAL char g_hdr_names[MAX_EXTRA_HEADERS][MAX_EXTRA_HEADER_NAME
 static NAC_THREADLOCAL char g_hdr_values[MAX_EXTRA_HEADERS][MAX_EXTRA_HEADER_VALUE];
 static NAC_THREADLOCAL int g_hdr_count = 0;
 
-static int ci_equal(const char *a, const char *b) {
-    while (*a && *b) {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
-        a++;
-        b++;
-    }
-    return *a == '\0' && *b == '\0';
-}
-
 static int valid_header_name(const char *name) {
     if (!name[0]) return 0;
     for (const char *p = name; *p; p++) {
@@ -566,7 +619,7 @@ int nac_header_set(const char *name, const char *value) {
     if (strlen(name) >= MAX_EXTRA_HEADER_NAME || strlen(value) >= MAX_EXTRA_HEADER_VALUE) return -1;
 
     for (int i = 0; i < g_hdr_count; i++) {
-        if (ci_equal(g_hdr_names[i], name)) {
+        if (nac_ci_equal(g_hdr_names[i], name)) {
             strcpy(g_hdr_names[i], name);
             strcpy(g_hdr_values[i], value);
             return 0;
@@ -607,9 +660,8 @@ static Value response_from_result(Value result) {
     if (result.type == TYPE_STRING) {
         map_set(&response, "body", result);
     } else {
-        char text[MAX_STRING_LEN];
-        value_to_display_string(result, text, sizeof(text));
-        map_set(&response, "body", make_string(text));
+        char *text = display_to_heap(result);
+        map_set(&response, "body", make_string_take(text ? text : dup_str("")));
     }
     Value empty = make_map();
     map_set(&response, "headers", empty);
@@ -640,7 +692,7 @@ static void apply_headers_to_result(Value *result) {
          * that the response never carries it twice. */
         const char *key = g_hdr_names[i];
         for (int k = 0; k < headers->map_val.size; k++) {
-            if (ci_equal(headers->map_val.keys[k], g_hdr_names[i])) {
+            if (nac_ci_equal(headers->map_val.keys[k], g_hdr_names[i])) {
                 key = headers->map_val.keys[k];
                 break;
             }
@@ -670,7 +722,7 @@ static void apply_headers_to_raw(char **raw, int *raw_len) {
 
     size_t extra = 0;
     for (int i = 0; i < g_hdr_count; i++) {
-        if (ci_equal(g_hdr_names[i], "connection")) continue;
+        if (nac_ci_equal(g_hdr_names[i], "connection")) continue;
         extra += strlen(g_hdr_names[i]) + strlen(g_hdr_values[i]) + 4;
     }
     char *out = (char*)malloc((size_t)len + extra + 1);
@@ -687,13 +739,13 @@ static void apply_headers_to_raw(char **raw, int *raw_len) {
         int drop = 0;
         if (!first) {
             for (int i = 0; i < g_hdr_count && !drop; i++) {
-                if (ci_equal(g_hdr_names[i], "connection")) continue;
+                if (nac_ci_equal(g_hdr_names[i], "connection")) continue;
                 size_t nlen = strlen(g_hdr_names[i]);
                 if ((size_t)line_len > nlen && buf[pos + nlen] == ':') {
                     char head[MAX_EXTRA_HEADER_NAME];
                     memcpy(head, buf + pos, nlen);
                     head[nlen] = '\0';
-                    if (ci_equal(head, g_hdr_names[i])) drop = 1;
+                    if (nac_ci_equal(head, g_hdr_names[i])) drop = 1;
                 }
             }
         }
@@ -708,7 +760,7 @@ static void apply_headers_to_raw(char **raw, int *raw_len) {
     }
 
     for (int i = 0; i < g_hdr_count; i++) {
-        if (ci_equal(g_hdr_names[i], "connection")) continue;
+        if (nac_ci_equal(g_hdr_names[i], "connection")) continue;
         o += sprintf(out + o, "%s: %s\r\n", g_hdr_names[i], g_hdr_values[i]);
     }
     out[o++] = '\r';

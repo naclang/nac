@@ -1,0 +1,36 @@
+// 01 - Variables, strings and template strings
+//
+// Run:  nac examples/basics/01_variables_and_strings.nac
+
+// Variables need no keyword; assigning creates them.
+x = 5
+pi = 3.14
+name = "NaC"
+done = false
+
+// "+" joins strings, and numbers are converted automatically.
+first_name = "John"
+last_name = "Doe"
+full_name = first_name + " " + last_name
+print("Hello, " + full_name + "!")
+print("x is " + x)
+
+// Template strings use backticks; any expression works inside ${ }.
+print(`x - 1 = ${x - 1}`)
+print(`${name} has ${len(name)} letters`)
+
+// Compound assignment: += -= *= /=
+n = 10
+n += 5      // 15
+n -= 3      // 12
+n *= 2      // 24
+n /= 4      // 6
+print("n =", n)
+
+s = "Hello"
+s += ", world!"
+print(s)
+
+// Conversions and membership
+print(str(42) + "!", int("7") + 1)
+print("ell" in "hello", "z" not in "hello")

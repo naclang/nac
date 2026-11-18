@@ -14,7 +14,9 @@ void report_error(const char *msg) {
         }
         return;
     }
-    fprintf(stderr, "Error (Line %d, Column %d): %s\n", current_token.line, current_token.col, msg);
+    int line = nac_eval_line > 0 ? nac_eval_line : current_token.line;
+    int col = nac_eval_line > 0 ? nac_eval_col : current_token.col;
+    fprintf(stderr, "Error (Line %d, Column %d): %s\n", line, col, msg);
     error_occurred = true;
     error_count++;
 }
